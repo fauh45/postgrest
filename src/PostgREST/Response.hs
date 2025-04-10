@@ -63,10 +63,13 @@ data PgrstResponse = PgrstResponse {
 
 actionResponse :: QueryResult -> ApiRequest -> (Text, Text) -> AppConfig -> SchemaCache -> Schema -> Bool -> Either Error.Error PgrstResponse
 
-actionResponse (RawSQLResult rawSQL) _ _ _ _ _ _  =
+actionResponse (RawSQLResult rawSQL body) _ _ _ _ _ _  =
   Right $ PgrstResponse HTTP.status200
-    [MediaType.toContentType MTApplicationSQL]
-    (LBS.fromStrict rawSQL)
+    [MediaType.toContentType MTApplicationJSON]
+    (JSON.encode (HM.fromList [
+      ("sql" :: Text, toS rawSQL),
+      ("body" :: Text, maybe "" toS body)
+    ] :: HM.HashMap Text Text))
 
 actionResponse (DbCrudResult WrappedReadPlan{wrMedia, wrHdrsOnly=headersOnly, crudQi=identifier} resultSet) ctxApiRequest@ApiRequest{iPreferences=Preferences{..},..} _ _ _ _ _ =
   case resultSet of

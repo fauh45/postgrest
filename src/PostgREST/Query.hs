@@ -79,7 +79,7 @@ data QueryResult
   | DbCallResult  CallReadPlan  ResultSet
   | MaybeDbResult InspectPlan  (Maybe (TablesMap, RoutineMap, Maybe Text))
   | NoDbResult    InfoPlan
-  | RawSQLResult  ByteString
+  | RawSQLResult  ByteString (Maybe ByteString)
 
 query :: AppConfig -> AuthResult -> ApiRequest -> ActionPlan -> SchemaCache -> PgVersion -> Query
 query _ _ _ (NoDb x) _ _ = NoDbQuery $ NoDbResult x
@@ -128,7 +128,7 @@ actionQuery (DbCrud WrappedReadPlan{wrMedia = MTApplicationSQL, ..}) AppConfig{.
       wrHandler
       configDbPreparedStatements
     mainActionQuery = do
-      pure $ RawSQLResult mainSQLQuery
+      pure $ RawSQLResult mainSQLQuery Nothing
 
 actionQuery (DbCrud plan@WrappedReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences=Preferences{..}} _ _ =
   (mainActionQuery, mainSQLQuery)
@@ -167,8 +167,13 @@ actionQuery (DbCrud MutateReadPlan{mrMedia = MTApplicationSQL, ..}) AppConfig{..
       preferResolution
       pkCols
       configDbPreparedStatements
+    -- NOTE: help on this please
+    mutateBody = case mrMutatePlan of
+      Insert{insBody} -> LBS.toStrict <$> insBody
+      Update{updBody} -> LBS.toStrict <$> updBody
+      Delete{} -> Nothing
     mainActionQuery = do
-      pure $ RawSQLResult mainSQLQuery
+      pure $ RawSQLResult mainSQLQuery mutateBody
 
 actionQuery (DbCrud plan@MutateReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences=Preferences{..}} _ _ =
   (mainActionQuery, mainSQLQuery)
