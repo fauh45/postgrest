@@ -1,46 +1,56 @@
 {-# LANGUAGE LambdaCase     #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE QuasiQuotes    #-}
-{-|
+
+{- |
 Module      : PostgREST.Query.SqlFragment
 Description : Helper functions for PostgREST.QueryBuilder.
 -}
-module PostgREST.Query.SqlFragment
-  ( noLocationF
-  , handlerF
-  , countF
-  , groupF
-  , fromQi
-  , limitOffsetF
-  , locationF
-  , orderF
-  , pgFmtColumn
-  , pgFmtFilter
-  , pgFmtIdent
-  , pgFmtJoinCondition
-  , pgFmtLogicTree
-  , pgFmtOrderTerm
-  , pgFmtSelectItem
-  , pgFmtSpreadSelectItem
-  , pgFmtSpreadJoinSelectItem
-  , fromJsonBodyF
-  , responseHeadersF
-  , responseStatusF
-  , addConfigPgrstInserted
-  , currentSettingF
-  , returningF
-  , singleParameter
-  , sourceCTE
-  , sourceCTEName
-  , unknownEncoder
-  , intercalateSnippet
-  , explainF
-  , setConfigWithConstantName
-  , setConfigWithDynamicName
-  , setConfigWithConstantNameJSON
-  , escapeIdent
-  , escapeIdentList
-  ) where
+module PostgREST.Query.SqlFragment (
+  TrackedSnippet (..),
+  emptyTracked,
+  trackParam,
+  trackedParams,
+  trackParams,
+  rawSQL,
+  fromSnippet,
+  toSnippet,
+  ToTrackedSnippet (..),
+  noLocationF,
+  handlerF,
+  countF,
+  groupF,
+  fromQi,
+  limitOffsetF,
+  locationF,
+  orderF,
+  pgFmtColumn,
+  pgFmtFilter,
+  pgFmtIdent,
+  pgFmtJoinCondition,
+  pgFmtLogicTree,
+  pgFmtOrderTerm,
+  pgFmtSelectItem,
+  pgFmtSpreadSelectItem,
+  pgFmtSpreadJoinSelectItem,
+  fromJsonBodyF,
+  responseHeadersF,
+  responseStatusF,
+  addConfigPgrstInserted,
+  currentSettingF,
+  returningF,
+  singleParameter,
+  sourceCTE,
+  sourceCTEName,
+  unknownEncoder,
+  intercalateSnippet,
+  explainF,
+  setConfigWithConstantName,
+  setConfigWithDynamicName,
+  setConfigWithConstantNameJSON,
+  escapeIdent,
+  escapeIdentList,
+) where
 
 import qualified Data.Aeson                      as JSON
 import qualified Data.ByteString.Char8           as BS
@@ -96,52 +106,106 @@ import PostgREST.SchemaCache.Routine     (MediaHandler (..),
 
 import Protolude hiding (Sum, cast)
 
+data TrackedSnippet = TrackedSnippet
+  { snippet :: SQL.Snippet
+  , params  :: [Maybe ByteString] -- (Encoder, Description/Value)
+  }
+
+-- | Access params of the TrackedSnippet
+trackedParams :: TrackedSnippet -> [Maybe ByteString]
+trackedParams = params
+
+-- | Create an empty tracked snippet
+emptyTracked :: TrackedSnippet
+emptyTracked = TrackedSnippet mempty []
+
+-- | Create a tracked snippet from raw SQL with no parameters
+rawSQL :: ByteString -> TrackedSnippet
+rawSQL sql = TrackedSnippet (SQL.sql sql) []
+
+-- | Track a single parameter with its SQL snippet
+trackParam :: ByteString -> SQL.Snippet -> TrackedSnippet
+trackParam param snip = TrackedSnippet snip [Just param]
+
+-- | Track multiple parameters with their descriptions and encoder
+trackParams :: [Maybe ByteString] -> SQL.Snippet -> TrackedSnippet
+trackParams params snip = TrackedSnippet snip params
+
+-- | Convert SQL.Snippet to TrackedSnippet (for backward compatibility)
+fromSnippet :: SQL.Snippet -> TrackedSnippet
+fromSnippet snip = TrackedSnippet snip []
+
+-- | Convert TrackedSnippet to SQL.Snippet (for backward compatibility)
+toSnippet :: TrackedSnippet -> SQL.Snippet
+toSnippet = snippet
+
+-- | Helper to allow SQL.Snippet and TrackedSnippet to coexist during transition
+class ToTrackedSnippet a where
+  toTrackedSnippet :: a -> TrackedSnippet
+
+instance ToTrackedSnippet SQL.Snippet where
+  toTrackedSnippet = fromSnippet
+
+instance ToTrackedSnippet TrackedSnippet where
+  toTrackedSnippet t = t
+
+-- | Concatenation for TrackedSnippet
+instance Semigroup TrackedSnippet where
+  TrackedSnippet s1 p1 <> TrackedSnippet s2 p2 = TrackedSnippet (s1 <> s2) (p1 <> p2)
+
+-- | Empty element for TrackedSnippet
+instance Monoid TrackedSnippet where
+  mempty = emptyTracked
+
 sourceCTEName :: Text
 sourceCTEName = "pgrst_source"
 
-sourceCTE :: SQL.Snippet
-sourceCTE = "pgrst_source"
+sourceCTE :: TrackedSnippet
+sourceCTE = rawSQL "pgrst_source"
 
-noLocationF :: SQL.Snippet
-noLocationF = "array[]::text[]"
+noLocationF :: TrackedSnippet
+noLocationF = rawSQL "array[]::text[]"
 
-simpleOperator :: SimpleOperator -> SQL.Snippet
+simpleOperator :: SimpleOperator -> TrackedSnippet
 simpleOperator = \case
-  OpNotEqual        -> "<>"
-  OpContains        -> "@>"
-  OpContained       -> "<@"
-  OpOverlap         -> "&&"
-  OpStrictlyLeft    -> "<<"
-  OpStrictlyRight   -> ">>"
-  OpNotExtendsRight -> "&<"
-  OpNotExtendsLeft  -> "&>"
-  OpAdjacent        -> "-|-"
+  OpNotEqual -> rawSQL "<>"
+  OpContains -> rawSQL "@>"
+  OpContained -> rawSQL "<@"
+  OpOverlap -> rawSQL "&&"
+  OpStrictlyLeft -> rawSQL "<<"
+  OpStrictlyRight -> rawSQL ">>"
+  OpNotExtendsRight -> rawSQL "&<"
+  OpNotExtendsLeft -> rawSQL "&>"
+  OpAdjacent -> rawSQL "-|-"
 
-quantOperator :: QuantOperator -> SQL.Snippet
+quantOperator :: QuantOperator -> TrackedSnippet
 quantOperator = \case
-  OpEqual            -> "="
-  OpGreaterThanEqual -> ">="
-  OpGreaterThan      -> ">"
-  OpLessThanEqual    -> "<="
-  OpLessThan         -> "<"
-  OpLike             -> "like"
-  OpILike            -> "ilike"
-  OpMatch            -> "~"
-  OpIMatch           -> "~*"
+  OpEqual -> rawSQL "="
+  OpGreaterThanEqual -> rawSQL ">="
+  OpGreaterThan -> rawSQL ">"
+  OpLessThanEqual -> rawSQL "<="
+  OpLessThan -> rawSQL "<"
+  OpLike -> rawSQL "like"
+  OpILike -> rawSQL "ilike"
+  OpMatch -> rawSQL "~"
+  OpIMatch -> rawSQL "~*"
 
-ftsOperator :: FtsOperator -> SQL.Snippet
+ftsOperator :: FtsOperator -> TrackedSnippet
 ftsOperator = \case
-  FilterFts          -> "@@ to_tsquery"
-  FilterFtsPlain     -> "@@ plainto_tsquery"
-  FilterFtsPhrase    -> "@@ phraseto_tsquery"
-  FilterFtsWebsearch -> "@@ websearch_to_tsquery"
+  FilterFts -> rawSQL "@@ to_tsquery"
+  FilterFtsPlain -> rawSQL "@@ plainto_tsquery"
+  FilterFtsPhrase -> rawSQL "@@ phraseto_tsquery"
+  FilterFtsWebsearch -> rawSQL "@@ websearch_to_tsquery"
 
-singleParameter :: Maybe LBS.ByteString -> ByteString -> SQL.Snippet
+singleParameter :: Maybe LBS.ByteString -> ByteString -> TrackedSnippet
 singleParameter body typ =
-  if typ == "bytea"
-    -- TODO: Hasql fails when using HE.unknown with bytea(pg tries to utf8 encode).
-    then SQL.encoderAndParam (HE.nullable HE.bytea) (LBS.toStrict <$> body)
-    else SQL.encoderAndParam (HE.nullable HE.unknown) (LBS.toStrict <$> body) <> "::" <> SQL.sql typ
+  let strictBody = LBS.toStrict <$> body
+      snippet =
+        if typ == "bytea"
+          -- TODO: Hasql fails when using HE.unknown with bytea(pg tries to utf8 encode).
+          then SQL.encoderAndParam (HE.nullable HE.bytea) strictBody
+          else SQL.encoderAndParam (HE.nullable HE.unknown) strictBody <> "::" <> SQL.sql typ
+   in TrackedSnippet snippet [strictBody]
 
 -- Here we build the pg array literal, e.g '{"Hebdon, John","Other","Another"}', manually.
 -- This is necessary to pass an "unknown" array and let pg infer the type.
@@ -151,14 +215,14 @@ singleParameter body typ =
 -- https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-ESCAPE
 pgBuildArrayLiteral :: [Text] -> Text
 pgBuildArrayLiteral vals =
- let trimmed = trimNullChars
-     slashed = T.replace "\\" "\\\\" . trimmed
-     escaped x = "\"" <> T.replace "\"" "\\\"" (slashed x) <> "\"" in
- "{" <> T.intercalate "," (escaped <$> vals) <> "}"
+  let trimmed = trimNullChars
+      slashed = T.replace "\\" "\\\\" . trimmed
+      escaped x = "\"" <> T.replace "\"" "\\\"" (slashed x) <> "\""
+   in "{" <> T.intercalate "," (escaped <$> vals) <> "}"
 
 -- TODO: refactor by following https://github.com/PostgREST/postgrest/pull/1631#issuecomment-711070833
-pgFmtIdent :: Text -> SQL.Snippet
-pgFmtIdent x = SQL.sql . encodeUtf8 $ escapeIdent x
+pgFmtIdent :: Text -> TrackedSnippet
+pgFmtIdent x = rawSQL . encodeUtf8 $ escapeIdent x
 
 escapeIdent :: Text -> Text
 escapeIdent x = "\"" <> T.replace "\"" "\"\"" (trimNullChars x) <> "\""
@@ -168,421 +232,471 @@ pgFmtLit :: Text -> Text
 pgFmtLit x =
   let trimmed = trimNullChars x
       escaped = "'" <> T.replace "'" "''" trimmed <> "'"
-      slashed = T.replace "\\" "\\\\" escaped in
-  if "\\" `T.isInfixOf` escaped
-    then "E" <> slashed
-    else slashed
+      slashed = T.replace "\\" "\\\\" escaped
+   in if "\\" `T.isInfixOf` escaped
+        then "E" <> slashed
+        else slashed
 
 trimNullChars :: Text -> Text
 trimNullChars = T.takeWhile (/= '\x0')
 
--- |
--- Format a list of identifiers and separate them by commas.
---
--- >>> escapeIdentList ["schema_1", "schema_2", "SPECIAL \"@/\\#~_-"]
--- "\"schema_1\", \"schema_2\", \"SPECIAL \"\"@/\\#~_-\""
+{- |
+Format a list of identifiers and separate them by commas.
+
+>>> escapeIdentList ["schema_1", "schema_2", "SPECIAL \"@/\\#~_-"]
+"\"schema_1\", \"schema_2\", \"SPECIAL \"\"@/\\#~_-\""
+-}
 escapeIdentList :: [Text] -> ByteString
 escapeIdentList schemas = BS.intercalate ", " $ encodeUtf8 . escapeIdent <$> schemas
 
-asCsvF :: SQL.Snippet
-asCsvF = asCsvHeaderF <> " || '\n' || " <> asCsvBodyF
-  where
-    asCsvHeaderF =
-      "(SELECT coalesce(string_agg(a.k, ','), '')" <>
-      "  FROM (" <>
-      "    SELECT json_object_keys(r)::text as k" <>
-      "    FROM ( " <>
-      "      SELECT row_to_json(hh) as r from " <> sourceCTE <> " as hh limit 1" <>
-      "    ) s" <>
-      "  ) a" <>
-      ")"
-    asCsvBodyF = "coalesce(string_agg(substring(_postgrest_t::text, 2, length(_postgrest_t::text) - 2), '\n'), '')"
+asCsvF :: TrackedSnippet
+asCsvF = asCsvHeaderF <> rawSQL " || '\n' || " <> asCsvBodyF
+ where
+  asCsvHeaderF =
+    rawSQL "(SELECT coalesce(string_agg(a.k, ','), '')"
+      <> rawSQL "  FROM ("
+      <> rawSQL "    SELECT json_object_keys(r)::text as k"
+      <> rawSQL "    FROM ( "
+      <> rawSQL "      SELECT row_to_json(hh) as r from "
+      <> sourceCTE
+      <> rawSQL " as hh limit 1"
+      <> rawSQL "    ) s"
+      <> rawSQL "  ) a"
+      <> rawSQL ")"
+  asCsvBodyF = rawSQL "coalesce(string_agg(substring(_postgrest_t::text, 2, length(_postgrest_t::text) - 2), '\n'), '')"
 
-addNullsToSnip :: Bool -> SQL.Snippet -> SQL.Snippet
-addNullsToSnip strip snip =
-  if strip then "json_strip_nulls(" <> snip <> ")" else  snip
+addNullsToSnip :: Bool -> TrackedSnippet -> TrackedSnippet
+addNullsToSnip strip (TrackedSnippet snip params) =
+  if strip
+    then
+      TrackedSnippet (SQL.sql "json_strip_nulls(" <> snip <> SQL.sql ")") params
+    else
+      TrackedSnippet snip params
 
-asJsonSingleF :: Maybe Routine -> Bool -> SQL.Snippet
+asJsonSingleF :: Maybe Routine -> Bool -> TrackedSnippet
 asJsonSingleF rout strip
-  | returnsScalar = "coalesce(" <> addNullsToSnip strip "json_agg(_postgrest_t.pgrst_scalar)->0"  <> ", 'null')"
-  | otherwise     = "coalesce(" <> addNullsToSnip strip "json_agg(_postgrest_t)->0"  <> ", 'null')"
-  where
-    returnsScalar = maybe False funcReturnsScalar rout
+  | returnsScalar = rawSQL "coalesce(" <> addNullsToSnip strip (rawSQL "json_agg(_postgrest_t.pgrst_scalar)->0") <> rawSQL ", 'null')"
+  | otherwise = rawSQL "coalesce(" <> addNullsToSnip strip (rawSQL "json_agg(_postgrest_t)->0") <> rawSQL ", 'null')"
+ where
+  returnsScalar = maybe False funcReturnsScalar rout
 
-asJsonF :: Maybe Routine -> Bool -> SQL.Snippet
+asJsonF :: Maybe Routine -> Bool -> TrackedSnippet
 asJsonF rout strip
-  | returnsSingleComposite    = "coalesce(" <> addNullsToSnip strip "json_agg(_postgrest_t)->0" <> ", 'null')"
-  | returnsScalar             = "coalesce(" <> addNullsToSnip strip "json_agg(_postgrest_t.pgrst_scalar)->0" <> ", 'null')"
-  | returnsSetOfScalar        = "coalesce(" <> addNullsToSnip strip "json_agg(_postgrest_t.pgrst_scalar)" <> ", '[]')"
-  | otherwise                 = "coalesce(" <> addNullsToSnip strip "json_agg(_postgrest_t)" <> ", '[]')"
-  where
-    (returnsSingleComposite, returnsScalar, returnsSetOfScalar) = case rout of
-      Just r  -> (funcReturnsSingleComposite r, funcReturnsScalar r, funcReturnsSetOfScalar r)
-      Nothing -> (False, False, False)
+  | returnsSingleComposite = rawSQL "coalesce(" <> addNullsToSnip strip (rawSQL "json_agg(_postgrest_t)->0") <> rawSQL ", 'null')"
+  | returnsScalar = rawSQL "coalesce(" <> addNullsToSnip strip (rawSQL "json_agg(_postgrest_t.pgrst_scalar)->0") <> rawSQL ", 'null')"
+  | returnsSetOfScalar = rawSQL "coalesce(" <> addNullsToSnip strip (rawSQL "json_agg(_postgrest_t.pgrst_scalar)") <> rawSQL ", '[]')"
+  | otherwise = rawSQL "coalesce(" <> addNullsToSnip strip (rawSQL "json_agg(_postgrest_t)") <> rawSQL ", '[]')"
+ where
+  (returnsSingleComposite, returnsScalar, returnsSetOfScalar) = case rout of
+    Just r -> (funcReturnsSingleComposite r, funcReturnsScalar r, funcReturnsSetOfScalar r)
+    Nothing -> (False, False, False)
 
-asGeoJsonF ::  SQL.Snippet
-asGeoJsonF = "json_build_object('type', 'FeatureCollection', 'features', coalesce(json_agg(ST_AsGeoJSON(_postgrest_t)::json), '[]'))"
+asGeoJsonF :: TrackedSnippet
+asGeoJsonF = rawSQL "json_build_object('type', 'FeatureCollection', 'features', coalesce(json_agg(ST_AsGeoJSON(_postgrest_t)::json), '[]'))"
 
-customFuncF :: Maybe Routine -> QualifiedIdentifier -> RelIdentifier -> SQL.Snippet
+customFuncF :: Maybe Routine -> QualifiedIdentifier -> RelIdentifier -> TrackedSnippet
 customFuncF rout funcQi _
-  | (funcReturnsScalar <$> rout) == Just True = fromQi funcQi <> "(_postgrest_t.pgrst_scalar)"
-customFuncF _ funcQi RelAnyElement            = fromQi funcQi <> "(_postgrest_t)"
-customFuncF _ funcQi (RelId target)           = fromQi funcQi <> "(_postgrest_t::" <> fromQi target <> ")"
+  | (funcReturnsScalar <$> rout) == Just True = fromQi funcQi <> rawSQL "(_postgrest_t.pgrst_scalar)"
+customFuncF _ funcQi RelAnyElement = fromQi funcQi <> rawSQL "(_postgrest_t)"
+customFuncF _ funcQi (RelId target) = fromQi funcQi <> rawSQL "(_postgrest_t::" <> fromQi target <> rawSQL ")"
 
-locationF :: [Text] -> SQL.Snippet
-locationF pKeys = SQL.sql $ encodeUtf8 [trimming|(
+locationF :: [Text] -> TrackedSnippet
+locationF pKeys =
+  rawSQL $
+    encodeUtf8
+      [trimming|(
   WITH data AS (SELECT row_to_json(_) AS row FROM ${sourceCTEName} AS _ LIMIT 1)
   SELECT array_agg(json_data.key || '=' || coalesce('eq.' || json_data.value, 'is.null'))
   FROM data CROSS JOIN json_each_text(data.row) AS json_data
   WHERE json_data.key IN ('${fmtPKeys}')
 )|]
-  where
-    fmtPKeys = T.intercalate "','" pKeys
+ where
+  fmtPKeys = T.intercalate "','" pKeys
 
-fromQi :: QualifiedIdentifier -> SQL.Snippet
-fromQi t = (if T.null s then mempty else pgFmtIdent s <> ".") <> pgFmtIdent n
-  where
-    n = qiName t
-    s = qiSchema t
+fromQi :: QualifiedIdentifier -> TrackedSnippet
+fromQi t =
+  if T.null s
+    then pgFmtIdent n
+    else pgFmtIdent s <> rawSQL "." <> pgFmtIdent n
+ where
+  n = qiName t
+  s = qiSchema t
 
-pgFmtColumn :: QualifiedIdentifier -> Text -> SQL.Snippet
-pgFmtColumn table "*" = fromQi table <> ".*"
-pgFmtColumn table c   = fromQi table <> "." <> pgFmtIdent c
+pgFmtColumn :: QualifiedIdentifier -> Text -> TrackedSnippet
+pgFmtColumn table "*" = fromQi table <> rawSQL ".*"
+pgFmtColumn table c   = fromQi table <> rawSQL "." <> pgFmtIdent c
 
-pgFmtCallUnary :: Text -> SQL.Snippet -> SQL.Snippet
-pgFmtCallUnary f x = SQL.sql (encodeUtf8 f) <> "(" <> x <> ")"
+pgFmtCallUnary :: Text -> TrackedSnippet -> TrackedSnippet
+pgFmtCallUnary f (TrackedSnippet x params) =
+  TrackedSnippet (SQL.sql (encodeUtf8 f) <> "(" <> x <> ")") params
 
-pgFmtField :: QualifiedIdentifier -> CoercibleField -> SQL.Snippet
+pgFmtField :: QualifiedIdentifier -> CoercibleField -> TrackedSnippet
 pgFmtField table cf = case cfToTsVector cf of
-  Just (ToTsVector lang) -> "to_tsvector(" <> pgFmtFtsLang lang <> fmtFld <> ")"
-  _                      -> fmtFld
-  where
-    fmtFld = case cf of
-      CoercibleField{cfFullRow=True}                                          -> pgFmtIdent (qiName table)
-      CoercibleField{cfName=fn, cfJsonPath=[]}                                -> pgFmtColumn table fn
-      CoercibleField{cfName=fn, cfToJson=doToJson, cfJsonPath=jp} | doToJson  -> "to_jsonb(" <> pgFmtColumn table fn <> ")" <> pgFmtJsonPath jp
-                                                                  | otherwise -> pgFmtColumn table fn <> pgFmtJsonPath jp
+  Just (ToTsVector lang) -> rawSQL "to_tsvector(" <> pgFmtFtsLang lang <> fmtFld <> rawSQL ")"
+  _ -> fmtFld
+ where
+  fmtFld = case cf of
+    CoercibleField{cfFullRow = True} -> pgFmtIdent (qiName table)
+    CoercibleField{cfName = fn, cfJsonPath = []} -> pgFmtColumn table fn
+    CoercibleField{cfName = fn, cfToJson = doToJson, cfJsonPath = jp}
+      | doToJson -> rawSQL "to_jsonb(" <> pgFmtColumn table fn <> rawSQL ")" <> pgFmtJsonPath jp
+      | otherwise -> pgFmtColumn table fn <> pgFmtJsonPath jp
 
 -- Select the value of a named element from a table, applying its optional coercion mapping if any.
-pgFmtTableCoerce :: QualifiedIdentifier -> CoercibleField -> SQL.Snippet
-pgFmtTableCoerce table fld@(CoercibleField{cfTransform=(Just formatterProc)}) = pgFmtCallUnary formatterProc (pgFmtField table fld)
+pgFmtTableCoerce :: QualifiedIdentifier -> CoercibleField -> TrackedSnippet
+pgFmtTableCoerce table fld@(CoercibleField{cfTransform = (Just formatterProc)}) = pgFmtCallUnary formatterProc (pgFmtField table fld)
 pgFmtTableCoerce table f = pgFmtField table f
 
 -- | Like the previous but now we just have a name so no namespace or JSON paths.
-pgFmtCoerceNamed :: CoercibleField -> SQL.Snippet
-pgFmtCoerceNamed CoercibleField{cfName=fn, cfTransform=(Just formatterProc)} = pgFmtCallUnary formatterProc (pgFmtIdent fn) <> " AS " <> pgFmtIdent fn
-pgFmtCoerceNamed CoercibleField{cfName=fn} = pgFmtIdent fn
+pgFmtCoerceNamed :: CoercibleField -> TrackedSnippet
+pgFmtCoerceNamed CoercibleField{cfName = fn, cfTransform = (Just formatterProc)} =
+  pgFmtCallUnary formatterProc (pgFmtIdent fn) <> rawSQL " AS " <> pgFmtIdent fn
+pgFmtCoerceNamed CoercibleField{cfName = fn} = pgFmtIdent fn
 
-pgFmtSelectItem :: QualifiedIdentifier -> CoercibleSelectField -> SQL.Snippet
-pgFmtSelectItem table CoercibleSelectField{csField=fld, csAggFunction=agg, csAggCast=aggCast, csCast=cast, csAlias=alias} =
+pgFmtSelectItem :: QualifiedIdentifier -> CoercibleSelectField -> TrackedSnippet
+pgFmtSelectItem table CoercibleSelectField{csField = fld, csAggFunction = agg, csAggCast = aggCast, csCast = cast, csAlias = alias} =
   pgFmtApplyAggregate agg aggCast (pgFmtApplyCast cast (pgFmtTableCoerce table fld)) <> pgFmtAs alias
 
-pgFmtSpreadSelectItem :: Alias -> SpreadSelectField -> SQL.Snippet
+pgFmtSpreadSelectItem :: Alias -> SpreadSelectField -> TrackedSnippet
 pgFmtSpreadSelectItem aggAlias SpreadSelectField{ssSelName, ssSelAggFunction, ssSelAggCast, ssSelAlias} =
   pgFmtApplyAggregate ssSelAggFunction ssSelAggCast (pgFmtFullSelName aggAlias ssSelName) <> pgFmtAs ssSelAlias
 
-pgFmtApplyAggregate :: Maybe AggregateFunction -> Maybe Cast -> SQL.Snippet -> SQL.Snippet
+pgFmtApplyAggregate :: Maybe AggregateFunction -> Maybe Cast -> TrackedSnippet -> TrackedSnippet
 pgFmtApplyAggregate Nothing _ snippet = snippet
-pgFmtApplyAggregate (Just agg) aggCast snippet =
-  pgFmtApplyCast aggCast aggregatedSnippet
-  where
-    convertAggFunction :: AggregateFunction -> SQL.Snippet
-    -- Convert from e.g. Sum (the data type) to SUM
-    convertAggFunction = SQL.sql . BS.map toUpper . BS.pack . show
-    aggregatedSnippet = convertAggFunction agg <> "(" <> snippet <> ")"
+pgFmtApplyAggregate (Just agg) aggCast (TrackedSnippet snip params) =
+  pgFmtApplyCast aggCast (TrackedSnippet aggregatedSnippet params)
+ where
+  convertAggFunction :: AggregateFunction -> SQL.Snippet
+  -- Convert from e.g. Sum (the data type) to SUM
+  convertAggFunction = SQL.sql . BS.map toUpper . BS.pack . show
+  aggregatedSnippet = convertAggFunction agg <> "(" <> snip <> ")"
 
-pgFmtSpreadJoinSelectItem :: Alias -> [CoercibleOrderTerm] -> SpreadSelectField -> SQL.Snippet
+pgFmtSpreadJoinSelectItem :: Alias -> [CoercibleOrderTerm] -> SpreadSelectField -> TrackedSnippet
 pgFmtSpreadJoinSelectItem aggAlias order SpreadSelectField{ssSelName, ssSelAlias} =
-  "COALESCE(json_agg(" <> fmtField <> " " <> fmtOrder <> "),'[]')::jsonb" <> " AS " <> fmtAlias
-  where
-    fmtField = pgFmtFullSelName aggAlias ssSelName
-    fmtOrder = orderF (QualifiedIdentifier "" aggAlias) order
-    fmtAlias = pgFmtIdent (fromMaybe ssSelName ssSelAlias)
+  rawSQL "COALESCE(json_agg(" <> fmtField <> rawSQL " " <> fmtOrder <> rawSQL "),'[]')::jsonb" <> rawSQL " AS " <> fmtAlias
+ where
+  fmtField = pgFmtFullSelName aggAlias ssSelName
+  fmtOrder = orderF (QualifiedIdentifier "" aggAlias) order
+  fmtAlias = pgFmtIdent (fromMaybe ssSelName ssSelAlias)
 
-pgFmtApplyCast :: Maybe Cast -> SQL.Snippet -> SQL.Snippet
+pgFmtApplyCast :: Maybe Cast -> TrackedSnippet -> TrackedSnippet
 pgFmtApplyCast Nothing snippet = snippet
 -- Ideally we'd quote the cast with "pgFmtIdent cast". However, that would invalidate common casts such as "int", "bigint", etc.
 -- Try doing: `select 1::"bigint"` - it'll err, using "int8" will work though. There's some parser magic that pg does that's invalidated when quoting.
 -- Not quoting should be fine, we validate the input on Parsers.
-pgFmtApplyCast (Just cast) snippet = "CAST( " <> snippet <> " AS " <> SQL.sql (encodeUtf8 cast) <> " )"
+pgFmtApplyCast (Just cast) (TrackedSnippet snip params) =
+  TrackedSnippet (SQL.sql "CAST( " <> snip <> SQL.sql " AS " <> SQL.sql (encodeUtf8 cast) <> SQL.sql " )") params
 
-pgFmtFullSelName :: Alias -> FieldName -> SQL.Snippet
+pgFmtFullSelName :: Alias -> FieldName -> TrackedSnippet
 pgFmtFullSelName aggAlias fieldName = case fieldName of
-  "*" -> pgFmtIdent aggAlias <> ".*"
-  _   -> pgFmtIdent aggAlias <> "." <> pgFmtIdent fieldName
+  "*" -> pgFmtIdent aggAlias <> rawSQL ".*"
+  _   -> pgFmtIdent aggAlias <> rawSQL "." <> pgFmtIdent fieldName
 
 -- TODO: At this stage there shouldn't be a Maybe since ApiRequest should ensure that an INSERT/UPDATE has a body
-fromJsonBodyF :: Maybe LBS.ByteString -> [CoercibleField] -> Bool -> Bool -> Bool -> SQL.Snippet
+fromJsonBodyF :: Maybe LBS.ByteString -> [CoercibleField] -> Bool -> Bool -> Bool -> TrackedSnippet
 fromJsonBodyF body fields includeSelect includeLimitOne includeDefaults =
-  (if includeSelect then "SELECT " <> namedCols <> " " else mempty) <>
-  "FROM (SELECT " <> jsonPlaceHolder <> " AS json_data) pgrst_payload, " <>
-  (if includeDefaults
-    then if isJsonObject
-      then "LATERAL (SELECT " <> defsJsonb <> " || pgrst_payload.json_data AS val) pgrst_json_defs, "
-      else "LATERAL (SELECT jsonb_agg(" <> defsJsonb <> " || elem) AS val from jsonb_array_elements(pgrst_payload.json_data) elem) pgrst_json_defs, "
-    else mempty) <>
-  "LATERAL (SELECT " <> parsedCols <> " FROM " <>
-    (if null fields -- when json keys are empty, e.g. when payload is `{}` or `[{}, {}]`
-      then SQL.sql $
-        if isJsonObject
-          then "(values(1)) _ "                                  -- only 1 row for an empty json object '{}'
-          else jsonArrayElementsF <> "(" <> finalBodyF <> ") _ " -- extract rows of a json array of empty objects `[{}, {}]`
-      else jsonToRecordsetF <> "(" <> SQL.sql finalBodyF <> ") AS _(" <> typedCols <> ") " <> if includeLimitOne then "LIMIT 1" else mempty
-    ) <>
-  ") pgrst_body "
-  where
-    namedCols = intercalateSnippet ", " $ fromQi  . QualifiedIdentifier "pgrst_body" . cfName <$> fields
-    parsedCols = intercalateSnippet ", " $ pgFmtCoerceNamed <$> fields
-    typedCols = intercalateSnippet ", " $ pgFmtIdent . cfName <> const " " <> SQL.sql . encodeUtf8 . cfIRType <$> fields
-    defsJsonb = SQL.sql $ "jsonb_build_object(" <> BS.intercalate "," fieldsWDefaults <> ")"
-    fieldsWDefaults = mapMaybe (\case
-        CoercibleField{cfName=nam, cfDefault=Just def} -> Just $ encodeUtf8 (pgFmtLit nam <> ", " <> def)
-        CoercibleField{cfDefault=Nothing} -> Nothing
-      ) fields
-    (finalBodyF, jsonArrayElementsF, jsonToRecordsetF) =
-      if includeDefaults
-        then ("pgrst_json_defs.val", "jsonb_array_elements", if isJsonObject then "jsonb_to_record" else "jsonb_to_recordset")
-        else ("pgrst_payload.json_data", "json_array_elements", if isJsonObject then "json_to_record" else "json_to_recordset")
-    jsonPlaceHolder = SQL.encoderAndParam (HE.nullable $ if includeDefaults then HE.jsonbLazyBytes else HE.jsonLazyBytes) body
-    isJsonObject = -- light validation as pg's json_to_record(set) already validates that the body is valid JSON. We just need to know whether the body looks like an object or not.
-      let
-        insignificantWhitespace = [32,9,10,13] --" \t\n\r" [32,9,10,13] https://datatracker.ietf.org/doc/html/rfc8259#section-2
-      in
+  (if includeSelect then rawSQL "SELECT " <> namedCols <> rawSQL " " else emptyTracked)
+    <> rawSQL "FROM (SELECT "
+    <> jsonPlaceHolder
+    <> rawSQL " AS json_data) pgrst_payload, "
+    <> ( if includeDefaults
+          then
+            if isJsonObject
+              then rawSQL "LATERAL (SELECT " <> defsJsonb <> rawSQL " || pgrst_payload.json_data AS val) pgrst_json_defs, "
+              else rawSQL "LATERAL (SELECT jsonb_agg(" <> defsJsonb <> rawSQL " || elem) AS val from jsonb_array_elements(pgrst_payload.json_data) elem) pgrst_json_defs, "
+          else emptyTracked
+       )
+    <> rawSQL "LATERAL (SELECT "
+    <> parsedCols
+    <> rawSQL " FROM "
+    <> ( if null fields -- when json keys are empty, e.g. when payload is `{}` or `[{}, {}]`
+          then
+            if isJsonObject
+              then rawSQL "(values(1)) _ " -- only 1 row for an empty json object '{}'
+              else rawSQL (encodeUtf8 jsonArrayElementsF) <> rawSQL "(" <> rawSQL (encodeUtf8 finalBodyF) <> rawSQL ") _ " -- extract rows of a json array of empty objects `[{}, {}]`
+          else rawSQL (encodeUtf8 jsonToRecordsetF) <> rawSQL "(" <> rawSQL (encodeUtf8 finalBodyF) <> rawSQL ") AS _(" <> typedCols <> rawSQL ") " <> if includeLimitOne then rawSQL "LIMIT 1" else emptyTracked
+       )
+    <> rawSQL ") pgrst_body "
+ where
+  namedCols = intercalateSnippet ", " $ fromQi . QualifiedIdentifier "pgrst_body" . cfName <$> fields
+  parsedCols = intercalateSnippet ", " $ pgFmtCoerceNamed <$> fields
+  typedCols = intercalateSnippet ", " $ pgFmtIdent . cfName <> const (rawSQL " ") <> rawSQL . encodeUtf8 . cfIRType <$> fields
+  defsJsonb = rawSQL $ "jsonb_build_object(" <> BS.intercalate "," fieldsWDefaults <> ")"
+  fieldsWDefaults =
+    mapMaybe
+      ( \case
+          CoercibleField{cfName = nam, cfDefault = Just def} -> Just $ encodeUtf8 (pgFmtLit nam <> ", " <> def)
+          CoercibleField{cfDefault = Nothing} -> Nothing
+      )
+      fields
+  (finalBodyF, jsonArrayElementsF, jsonToRecordsetF) =
+    if includeDefaults
+      then ("pgrst_json_defs.val", "jsonb_array_elements", if isJsonObject then "jsonb_to_record" else "jsonb_to_recordset")
+      else ("pgrst_payload.json_data", "json_array_elements", if isJsonObject then "json_to_record" else "json_to_recordset")
+  jsonPlaceHolder = TrackedSnippet (SQL.encoderAndParam (HE.nullable $ if includeDefaults then HE.jsonbLazyBytes else HE.jsonLazyBytes) body) [LBS.toStrict <$> body]
+  isJsonObject =
+    -- light validation as pg's json_to_record(set) already validates that the body is valid JSON. We just need to know whether the body looks like an object or not.
+    let
+      insignificantWhitespace = [32, 9, 10, 13] -- " \t\n\r" [32,9,10,13] https://datatracker.ietf.org/doc/html/rfc8259#section-2
+     in
       LBS.take 1 (LBS.dropWhile (`elem` insignificantWhitespace) (fromMaybe mempty body)) == "{"
 
-pgFmtOrderTerm :: QualifiedIdentifier -> CoercibleOrderTerm -> SQL.Snippet
+pgFmtOrderTerm :: QualifiedIdentifier -> CoercibleOrderTerm -> TrackedSnippet
 pgFmtOrderTerm qi ot =
-  fmtOTerm ot <> " " <>
-  SQL.sql (BS.unwords [
-    maybe mempty direction $ coDirection ot,
-    maybe mempty nullOrder $ coNullOrder ot])
-  where
-    fmtOTerm = \case
-      CoercibleOrderTerm{coField=cof}                            -> pgFmtField qi cof
-      CoercibleOrderRelationTerm{coRelation, coRelTerm=(fn, jp)} -> pgFmtField (QualifiedIdentifier mempty coRelation) (unknownField fn jp)
+  fmtOTerm ot
+    <> rawSQL " "
+    <> rawSQL
+      ( BS.unwords
+          [ maybe mempty direction $ coDirection ot
+          , maybe mempty nullOrder $ coNullOrder ot
+          ]
+      )
+ where
+  fmtOTerm = \case
+    CoercibleOrderTerm{coField = cof} -> pgFmtField qi cof
+    CoercibleOrderRelationTerm{coRelation, coRelTerm = (fn, jp)} -> pgFmtField (QualifiedIdentifier mempty coRelation) (unknownField fn jp)
 
-    direction OrderAsc  = "ASC"
-    direction OrderDesc = "DESC"
+  direction OrderAsc  = "ASC"
+  direction OrderDesc = "DESC"
 
-    nullOrder OrderNullsFirst = "NULLS FIRST"
-    nullOrder OrderNullsLast  = "NULLS LAST"
+  nullOrder OrderNullsFirst = "NULLS FIRST"
+  nullOrder OrderNullsLast  = "NULLS LAST"
 
 -- | Interpret a literal in the way the planner indicated through the CoercibleField.
-pgFmtUnknownLiteralForField :: SQL.Snippet -> CoercibleField -> SQL.Snippet
-pgFmtUnknownLiteralForField value CoercibleField{cfTransform=(Just parserProc)} = pgFmtCallUnary parserProc value
+pgFmtUnknownLiteralForField :: TrackedSnippet -> CoercibleField -> TrackedSnippet
+pgFmtUnknownLiteralForField value CoercibleField{cfTransform = (Just parserProc)} = pgFmtCallUnary parserProc value
 -- But when no transform is requested, we just use the literal as-is.
 pgFmtUnknownLiteralForField value _ = value
 
 -- | Array version of the above, used by ANY().
-pgFmtArrayLiteralForField :: [Text] -> CoercibleField -> SQL.Snippet
+pgFmtArrayLiteralForField :: [Text] -> CoercibleField -> TrackedSnippet
 -- When a transformation is requested, we need to apply the transformation to each element of the array. This could be done by just making a query with `parser(value)` for each value, but may lead to huge query lengths. Imagine `data_representations.color_from_text('...'::text)` for repeated for a hundred values. Instead we use `unnest()` to unpack a standard array literal and then apply the transformation to each element, like a map.
 -- Note the literals will be treated as text since in every case when we use ANY() the parameters are textual (coming from a query string). We want to rely on the `text->domain` parser to do the right thing.
-pgFmtArrayLiteralForField values CoercibleField{cfTransform=(Just parserProc)} = SQL.sql "(SELECT " <> pgFmtCallUnary parserProc (SQL.sql "unnest(" <> unknownLiteral (pgBuildArrayLiteral values) <> "::text[])") <> ")"
+pgFmtArrayLiteralForField values CoercibleField{cfTransform = (Just parserProc)} =
+  let arrayLiteral = unknownLiteral (pgBuildArrayLiteral values)
+      unnestExpr = rawSQL "(unnest(" <> arrayLiteral <> rawSQL "::text[]))"
+   in rawSQL "(SELECT " <> pgFmtCallUnary parserProc unnestExpr <> rawSQL ")"
 -- When no transformation is requested, we don't need a subquery.
 pgFmtArrayLiteralForField values _ = unknownLiteral (pgBuildArrayLiteral values)
 
-
-pgFmtFilter :: QualifiedIdentifier -> CoercibleFilter -> SQL.Snippet
-pgFmtFilter _ (CoercibleFilterNullEmbed hasNot fld) = pgFmtIdent fld <> " IS " <> (if not hasNot then "NOT " else mempty) <> "DISTINCT FROM NULL"
-pgFmtFilter _ (CoercibleFilter _ (NoOpExpr _)) = mempty -- TODO unreachable because NoOpExpr is filtered on QueryParams
-pgFmtFilter table (CoercibleFilter fld (OpExpr hasNot oper)) = notOp <> " " <> pgFmtField table fld <> case oper of
-   Op op val  -> " " <> simpleOperator op <> " " <> pgFmtUnknownLiteralForField (unknownLiteral val) fld
-
-   OpQuant op quant val -> " " <> quantOperator op <> " " <> case op of
-     OpLike  -> fmtQuant quant $ unknownLiteral (T.map star val)
-     OpILike -> fmtQuant quant $ unknownLiteral (T.map star val)
-     _       -> fmtQuant quant $ pgFmtUnknownLiteralForField (unknownLiteral val) fld
-
-   -- IS cannot be prepared. `PREPARE boolplan AS SELECT * FROM projects where id IS $1` will give a syntax error.
-   -- The above can be fixed by using `PREPARE boolplan AS SELECT * FROM projects where id IS NOT DISTINCT FROM $1;`
-   -- However that would not accept the TRUE/FALSE/NULL/"NOT NULL"/UNKNOWN keywords. See: https://stackoverflow.com/questions/6133525/proper-way-to-set-preparedstatement-parameter-to-null-under-postgres.
-   -- This is why `IS` operands are whitelisted at the Parsers.hs level
-   Is isVal -> " IS " <>
-      case isVal of
-        IsNull       -> "NULL"
-        IsNotNull    -> "NOT NULL"
-        IsTriTrue    -> "TRUE"
-        IsTriFalse   -> "FALSE"
-        IsTriUnknown -> "UNKNOWN"
-
-   IsDistinctFrom val -> " IS DISTINCT FROM " <> unknownLiteral val
-
-   -- We don't use "IN", we use "= ANY". IN has the following disadvantages:
-   -- + No way to use an empty value on IN: "col IN ()" is invalid syntax. With ANY we can do "= ANY('{}')"
-   -- + Can invalidate prepared statements: multiple parameters on an IN($1, $2, $3) will lead to using different prepared statements and not take advantage of caching.
-   In vals -> " " <> case vals of
-      [""] -> "= ANY('{}') "
-      _    -> "= ANY (" <> pgFmtArrayLiteralForField vals fld <> ") "
-
-   Fts op lang val -> " " <> ftsOperator op <> "(" <> pgFmtFtsLang lang <> unknownLiteral val <> ") "
+pgFmtFilter :: QualifiedIdentifier -> CoercibleFilter -> TrackedSnippet
+pgFmtFilter _ (CoercibleFilterNullEmbed hasNot fld) =
+  pgFmtIdent fld <> rawSQL " IS " <> rawSQL (if not hasNot then "NOT " else mempty) <> rawSQL "DISTINCT FROM NULL"
+pgFmtFilter _ (CoercibleFilter _ (NoOpExpr _)) = emptyTracked -- TODO unreachable because NoOpExpr is filtered on QueryParams
+pgFmtFilter table (CoercibleFilter fld (OpExpr hasNot oper)) =
+  rawSQL notOp <> rawSQL " " <> pgFmtField table fld <> case oper of
+    Op op val -> rawSQL " " <> simpleOperator op <> rawSQL " " <> pgFmtUnknownLiteralForField (unknownLiteral val) fld
+    OpQuant op quant val ->
+      rawSQL " " <> quantOperator op <> rawSQL " " <> case op of
+        OpLike -> fmtQuant quant $ unknownLiteral (T.map star val)
+        OpILike -> fmtQuant quant $ unknownLiteral (T.map star val)
+        _ -> fmtQuant quant $ pgFmtUnknownLiteralForField (unknownLiteral val) fld
+    -- IS cannot be prepared. `PREPARE boolplan AS SELECT * FROM projects where id IS $1` will give a syntax error.
+    -- The above can be fixed by using `PREPARE boolplan AS SELECT * FROM projects where id IS NOT DISTINCT FROM $1;`
+    -- However that would not accept the TRUE/FALSE/NULL/"NOT NULL"/UNKNOWN keywords. See: https://stackoverflow.com/questions/6133525/proper-way-to-set-preparedstatement-parameter-to-null-under-postgres.
+    -- This is why `IS` operands are whitelisted at the Parsers.hs level
+    Is isVal ->
+      rawSQL " IS "
+        <> case isVal of
+          IsNull       -> rawSQL "NULL"
+          IsNotNull    -> rawSQL "NOT NULL"
+          IsTriTrue    -> rawSQL "TRUE"
+          IsTriFalse   -> rawSQL "FALSE"
+          IsTriUnknown -> rawSQL "UNKNOWN"
+    IsDistinctFrom val -> rawSQL " IS DISTINCT FROM " <> unknownLiteral val
+    -- We don't use "IN", we use "= ANY". IN has the following disadvantages:
+    -- + No way to use an empty value on IN: "col IN ()" is invalid syntax. With ANY we can do "= ANY('{}')"
+    -- + Can invalidate prepared statements: multiple parameters on an IN($1, $2, $3) will lead to using different prepared statements and not take advantage of caching.
+    In vals ->
+      rawSQL " " <> case vals of
+        [""] -> rawSQL "= ANY('{}') "
+        _ -> rawSQL "= ANY (" <> pgFmtArrayLiteralForField vals fld <> rawSQL ") "
+    Fts op lang val -> rawSQL " " <> ftsOperator op <> rawSQL "(" <> pgFmtFtsLang lang <> unknownLiteral val <> rawSQL ") "
  where
-   notOp = if hasNot then "NOT" else mempty
-   star c = if c == '*' then '%' else c
-   fmtQuant q val = case q of
-    Just QuantAny -> "ANY(" <> val <> ")"
-    Just QuantAll -> "ALL(" <> val <> ")"
+  notOp = if hasNot then "NOT" else mempty
+  star c = if c == '*' then '%' else c
+  fmtQuant q val = case q of
+    Just QuantAny -> rawSQL "ANY(" <> val <> rawSQL ")"
+    Just QuantAll -> rawSQL "ALL(" <> val <> rawSQL ")"
     Nothing       -> val
 
-pgFmtFtsLang :: Maybe Text -> SQL.Snippet
-pgFmtFtsLang = maybe mempty (\l -> unknownLiteral l <> ", ")
+pgFmtFtsLang :: Maybe Text -> TrackedSnippet
+pgFmtFtsLang = maybe emptyTracked (\l -> unknownLiteral l <> rawSQL ", ")
 
-pgFmtJoinCondition :: JoinCondition -> SQL.Snippet
+pgFmtJoinCondition :: JoinCondition -> TrackedSnippet
 pgFmtJoinCondition (JoinCondition (qi1, col1) (qi2, col2)) =
-  pgFmtColumn qi1 col1 <> " = " <> pgFmtColumn qi2 col2
+  pgFmtColumn qi1 col1 <> rawSQL " = " <> pgFmtColumn qi2 col2
 
-pgFmtLogicTree :: QualifiedIdentifier -> CoercibleLogicTree -> SQL.Snippet
-pgFmtLogicTree qi (CoercibleExpr hasNot op forest) = SQL.sql notOp <> " (" <> intercalateSnippet (opSql op) (pgFmtLogicTree qi <$> forest) <> ")"
-  where
-    notOp =  if hasNot then "NOT" else mempty
+pgFmtLogicTree :: QualifiedIdentifier -> CoercibleLogicTree -> TrackedSnippet
+pgFmtLogicTree qi (CoercibleExpr hasNot op forest) = rawSQL notOp <> rawSQL " (" <> intercalateSnippet (opSql op) (pgFmtLogicTree qi <$> forest) <> rawSQL ")"
+ where
+  notOp = if hasNot then "NOT" else mempty
 
-    opSql And = " AND "
-    opSql Or  = " OR "
+  opSql And = " AND "
+  opSql Or  = " OR "
 pgFmtLogicTree qi (CoercibleStmnt flt) = pgFmtFilter qi flt
 
-pgFmtJsonPath :: JsonPath -> SQL.Snippet
+pgFmtJsonPath :: JsonPath -> TrackedSnippet
 pgFmtJsonPath = \case
-  []             -> mempty
-  (JArrow x:xs)  -> "->" <> pgFmtJsonOperand x <> pgFmtJsonPath xs
-  (J2Arrow x:xs) -> "->>" <> pgFmtJsonOperand x <> pgFmtJsonPath xs
-  where
-    pgFmtJsonOperand (JKey k) = unknownLiteral k
-    pgFmtJsonOperand (JIdx i) = unknownLiteral i <> "::int"
+  [] -> emptyTracked
+  (JArrow x : xs) -> rawSQL "->" <> pgFmtJsonOperand x <> pgFmtJsonPath xs
+  (J2Arrow x : xs) -> rawSQL "->>" <> pgFmtJsonOperand x <> pgFmtJsonPath xs
+ where
+  pgFmtJsonOperand (JKey k) = unknownLiteral k
+  pgFmtJsonOperand (JIdx i) = unknownLiteral i <> rawSQL "::int"
 
-pgFmtAs :: Maybe Alias -> SQL.Snippet
-pgFmtAs Nothing      = mempty
-pgFmtAs (Just alias) = " AS " <> pgFmtIdent alias
+pgFmtAs :: Maybe Alias -> TrackedSnippet
+pgFmtAs Nothing      = emptyTracked
+pgFmtAs (Just alias) = rawSQL " AS " <> pgFmtIdent alias
 
-groupF :: QualifiedIdentifier -> [CoercibleSelectField] -> [RelSelectField] -> SQL.Snippet
+groupF :: QualifiedIdentifier -> [CoercibleSelectField] -> [RelSelectField] -> TrackedSnippet
 groupF qi select relSelect
-  | (noSelectsAreAggregated && noRelSelectsAreAggregated) || null groupTerms = mempty
-  | otherwise = " GROUP BY " <> intercalateSnippet ", " groupTerms
-  where
-    noSelectsAreAggregated = null $ [s | s@(CoercibleSelectField { csAggFunction = Just _ }) <- select]
-    noRelSelectsAreAggregated = all (\case Spread sels _ -> all (isNothing . ssSelAggFunction) sels; _ -> True) relSelect
-    groupTermsFromSelect = mapMaybe (pgFmtGroup qi) select
-    groupTermsFromRelSelect = mapMaybe groupTermFromRelSelectField relSelect
-    groupTerms = groupTermsFromSelect ++ groupTermsFromRelSelect
+  | (noSelectsAreAggregated && noRelSelectsAreAggregated) || null groupTerms = emptyTracked
+  | otherwise = rawSQL " GROUP BY " <> intercalateSnippet ", " groupTerms
+ where
+  noSelectsAreAggregated = null $ [s | s@(CoercibleSelectField{csAggFunction = Just _}) <- select]
+  noRelSelectsAreAggregated = all (\case Spread sels _ -> all (isNothing . ssSelAggFunction) sels; _ -> True) relSelect
+  groupTermsFromSelect = mapMaybe (pgFmtGroup qi) select
+  groupTermsFromRelSelect = mapMaybe groupTermFromRelSelectField relSelect
+  groupTerms = groupTermsFromSelect ++ groupTermsFromRelSelect
 
-groupTermFromRelSelectField :: RelSelectField -> Maybe SQL.Snippet
-groupTermFromRelSelectField (JsonEmbed { rsSelName }) =
+groupTermFromRelSelectField :: RelSelectField -> Maybe TrackedSnippet
+groupTermFromRelSelectField (JsonEmbed{rsSelName}) =
   Just $ pgFmtIdent rsSelName
-groupTermFromRelSelectField (Spread { rsSpreadSel, rsAggAlias }) =
+groupTermFromRelSelectField (Spread{rsSpreadSel, rsAggAlias}) =
   if null groupTerms
-  then Nothing
-  else
-    Just $ intercalateSnippet ", " groupTerms
-  where
-    processField :: SpreadSelectField -> Maybe SQL.Snippet
-    processField SpreadSelectField{ssSelAggFunction = Just _} = Nothing
-    processField SpreadSelectField{ssSelName, ssSelAlias} =
-      Just $ pgFmtIdent rsAggAlias <> "." <> pgFmtIdent (fromMaybe ssSelName ssSelAlias)
-    groupTerms = mapMaybe processField rsSpreadSel
+    then Nothing
+    else
+      Just $ intercalateSnippet ", " groupTerms
+ where
+  processField :: SpreadSelectField -> Maybe TrackedSnippet
+  processField SpreadSelectField{ssSelAggFunction = Just _} = Nothing
+  processField SpreadSelectField{ssSelName, ssSelAlias} =
+    Just $ pgFmtIdent rsAggAlias <> rawSQL "." <> pgFmtIdent (fromMaybe ssSelName ssSelAlias)
+  groupTerms = mapMaybe processField rsSpreadSel
 
-pgFmtGroup :: QualifiedIdentifier -> CoercibleSelectField -> Maybe SQL.Snippet
-pgFmtGroup _  CoercibleSelectField{csAggFunction=Just _} = Nothing
-pgFmtGroup _  CoercibleSelectField{csAlias=Just alias, csAggFunction=Nothing} = Just $ pgFmtIdent alias
-pgFmtGroup qi CoercibleSelectField{csField=fld, csAlias=Nothing, csAggFunction=Nothing} = Just $ pgFmtField qi fld
+pgFmtGroup :: QualifiedIdentifier -> CoercibleSelectField -> Maybe TrackedSnippet
+pgFmtGroup _ CoercibleSelectField{csAggFunction = Just _} = Nothing
+pgFmtGroup _ CoercibleSelectField{csAlias = Just alias, csAggFunction = Nothing} = Just $ pgFmtIdent alias
+pgFmtGroup qi CoercibleSelectField{csField = fld, csAlias = Nothing, csAggFunction = Nothing} = Just $ pgFmtField qi fld
 
-countF :: SQL.Snippet -> Bool -> (SQL.Snippet, SQL.Snippet)
+countF :: TrackedSnippet -> Bool -> (TrackedSnippet, TrackedSnippet)
 countF countQuery shouldCount =
   if shouldCount
-    then (
-        ", pgrst_source_count AS (" <> countQuery <> ")"
-      , "(SELECT pg_catalog.count(*) FROM pgrst_source_count)" )
-    else (
-        mempty
-      , "null::bigint")
+    then
+      ( rawSQL ", pgrst_source_count AS (" <> countQuery <> rawSQL ")"
+      , rawSQL "(SELECT pg_catalog.count(*) FROM pgrst_source_count)"
+      )
+    else
+      ( emptyTracked
+      , rawSQL "null::bigint"
+      )
 
-returningF :: QualifiedIdentifier -> [FieldName] -> SQL.Snippet
+returningF :: QualifiedIdentifier -> [FieldName] -> TrackedSnippet
 returningF qi returnings =
   if null returnings
-    then "RETURNING 1" -- For mutation cases where there's no ?select, we return 1 to know how many rows were modified
-    else "RETURNING " <> intercalateSnippet ", " (pgFmtColumn qi <$> returnings)
+    then rawSQL "RETURNING 1" -- For mutation cases where there's no ?select, we return 1 to know how many rows were modified
+    else rawSQL "RETURNING " <> intercalateSnippet ", " (pgFmtColumn qi <$> returnings)
 
-limitOffsetF :: NonnegRange -> SQL.Snippet
+limitOffsetF :: NonnegRange -> TrackedSnippet
 limitOffsetF range =
-  if range == allRange then mempty else "LIMIT " <> limit <> " OFFSET " <> offset
-  where
-    limit = maybe "ALL" (\l -> unknownEncoder (BS.pack $ show l)) $ rangeLimit range
-    offset = unknownEncoder (BS.pack . show $ rangeOffset range)
+  if range == allRange
+    then emptyTracked
+    else
+      rawSQL "LIMIT " <> limit <> rawSQL " OFFSET " <> offset
+ where
+  limit = maybe (rawSQL "ALL") (\l -> unknownEncoder (BS.pack $ show l)) $ rangeLimit range
+  offset = unknownEncoder (BS.pack . show $ rangeOffset range)
 
-responseHeadersF :: SQL.Snippet
-responseHeadersF = currentSettingF "response.headers"
+responseHeadersF :: TrackedSnippet
+responseHeadersF = currentSettingF (rawSQL "response.headers")
 
-responseStatusF :: SQL.Snippet
-responseStatusF = currentSettingF "response.status"
+responseStatusF :: TrackedSnippet
+responseStatusF = currentSettingF (rawSQL "response.status")
 
-addConfigPgrstInserted :: Bool -> SQL.Snippet
+addConfigPgrstInserted :: Bool -> TrackedSnippet
 addConfigPgrstInserted add =
-  let (symbol, num) =  if add then ("+", "0") else ("-", "-1") in
-  "set_config('pgrst.inserted', (coalesce(" <> currentSettingF "pgrst.inserted" <> "::int, 0) " <> symbol <> " 1)::text, true) <> '" <> num <> "'"
+  let (symbol, num) = if add then ("+", "0") else ("-", "-1")
+      textFormula = "set_config('pgrst.inserted', (coalesce(current_setting('pgrst.inserted', true)::int, 0) " <> symbol <> " 1)::text, true) <> '" <> num <> "'"
+   in rawSQL (encodeUtf8 textFormula)
 
-currentSettingF :: SQL.Snippet -> SQL.Snippet
+currentSettingF :: TrackedSnippet -> TrackedSnippet
 currentSettingF setting =
   -- nullif is used because of https://gist.github.com/steve-chavez/8d7033ea5655096903f3b52f8ed09a15
-  "nullif(current_setting('" <> setting <> "', true), '')"
+  rawSQL "nullif(current_setting('" <> setting <> rawSQL "', true), '')"
 
-orderF :: QualifiedIdentifier -> [CoercibleOrderTerm] -> SQL.Snippet
-orderF _ []    = mempty
-orderF qi ordts = "ORDER BY " <> intercalateSnippet ", " (pgFmtOrderTerm qi <$> ordts)
+orderF :: QualifiedIdentifier -> [CoercibleOrderTerm] -> TrackedSnippet
+orderF _ [] = emptyTracked
+orderF qi ordts = rawSQL "ORDER BY " <> intercalateSnippet ", " (pgFmtOrderTerm qi <$> ordts)
 
 -- Hasql Snippet utilities
-unknownEncoder :: ByteString -> SQL.Snippet
-unknownEncoder = SQL.encoderAndParam (HE.nonNullable HE.unknown)
+unknownEncoder :: ByteString -> TrackedSnippet
+unknownEncoder bs =
+  let snippet = SQL.encoderAndParam (HE.nonNullable HE.unknown) bs
+   in TrackedSnippet snippet [Just bs]
 
-unknownLiteral :: Text -> SQL.Snippet
+unknownLiteral :: Text -> TrackedSnippet
 unknownLiteral = unknownEncoder . encodeUtf8
 
-intercalateSnippet :: ByteString -> [SQL.Snippet] -> SQL.Snippet
-intercalateSnippet _ [] = mempty
-intercalateSnippet frag snippets = foldr1 (\a b -> a <> SQL.sql frag <> b) snippets
+intercalateSnippet :: ByteString -> [TrackedSnippet] -> TrackedSnippet
+intercalateSnippet _ [] = emptyTracked
+intercalateSnippet frag snippets = foldr1 (\a b -> a <> rawSQL frag <> b) snippets
 
-explainF :: MTVndPlanFormat -> [MTVndPlanOption] -> SQL.Snippet -> SQL.Snippet
-explainF fmt opts snip =
-  "EXPLAIN (" <>
-    SQL.sql (BS.intercalate ", " (fmtPlanFmt fmt : (fmtPlanOpt <$> opts))) <>
-  ") " <> snip
-  where
-    fmtPlanOpt :: MTVndPlanOption -> BS.ByteString
-    fmtPlanOpt PlanAnalyze  = "ANALYZE"
-    fmtPlanOpt PlanVerbose  = "VERBOSE"
-    fmtPlanOpt PlanSettings = "SETTINGS"
-    fmtPlanOpt PlanBuffers  = "BUFFERS"
-    fmtPlanOpt PlanWAL      = "WAL"
+explainF :: MTVndPlanFormat -> [MTVndPlanOption] -> TrackedSnippet -> TrackedSnippet
+explainF fmt opts (TrackedSnippet snip params) =
+  TrackedSnippet
+    ( SQL.sql "EXPLAIN ("
+        <> SQL.sql (BS.intercalate ", " (fmtPlanFmt fmt : (fmtPlanOpt <$> opts)))
+        <> SQL.sql ") "
+        <> snip
+    )
+    params
+ where
+  fmtPlanOpt :: MTVndPlanOption -> BS.ByteString
+  fmtPlanOpt PlanAnalyze  = "ANALYZE"
+  fmtPlanOpt PlanVerbose  = "VERBOSE"
+  fmtPlanOpt PlanSettings = "SETTINGS"
+  fmtPlanOpt PlanBuffers  = "BUFFERS"
+  fmtPlanOpt PlanWAL      = "WAL"
 
-    fmtPlanFmt PlanText = "FORMAT TEXT"
-    fmtPlanFmt PlanJSON = "FORMAT JSON"
+  fmtPlanFmt PlanText = "FORMAT TEXT"
+  fmtPlanFmt PlanJSON = "FORMAT JSON"
 
 -- | Do a pg set_config(setting, value, true) call. This is equivalent to a SET LOCAL.
-setConfigLocal :: (SQL.Snippet, ByteString) -> SQL.Snippet
-setConfigLocal (k, v) =
-  "set_config(" <> k <> ", " <> unknownEncoder v <> ", true)"
+setConfigLocal :: (TrackedSnippet, ByteString) -> TrackedSnippet
+setConfigLocal (TrackedSnippet k kparams, v) =
+  let paramValue = unknownEncoder v
+   in TrackedSnippet
+        ( SQL.sql "set_config(" <> k <> SQL.sql ", " <> snippet paramValue <> SQL.sql ", true)"
+        )
+        (kparams ++ params paramValue)
 
 -- | For when the settings are hardcoded and not parameterized
-setConfigWithConstantName :: (SQL.Snippet, ByteString) -> SQL.Snippet
-setConfigWithConstantName (k, v) = setConfigLocal ("'" <> k <> "'", v)
+setConfigWithConstantName :: (SQL.Snippet, ByteString) -> TrackedSnippet
+setConfigWithConstantName (k, v) = setConfigLocal (TrackedSnippet ("'" <> k <> "'") [], v)
 
 -- | For when the settings need to be parameterized
-setConfigWithDynamicName :: (ByteString, ByteString) -> SQL.Snippet
+setConfigWithDynamicName :: (ByteString, ByteString) -> TrackedSnippet
 setConfigWithDynamicName (k, v) =
   setConfigLocal (unknownEncoder k, v)
 
--- | Starting from PostgreSQL v14, some characters are not allowed for config names (mostly affecting headers with "-").
--- | A JSON format string is used to avoid this problem. See https://github.com/PostgREST/postgrest/issues/1857
-setConfigWithConstantNameJSON :: SQL.Snippet -> [(ByteString, ByteString)] -> [SQL.Snippet]
+{- | Starting from PostgreSQL v14, some characters are not allowed for config names (mostly affecting headers with "-").
+| A JSON format string is used to avoid this problem. See https://github.com/PostgREST/postgrest/issues/1857
+-}
+setConfigWithConstantNameJSON :: SQL.Snippet -> [(ByteString, ByteString)] -> [TrackedSnippet]
 setConfigWithConstantNameJSON prefix keyVals = [setConfigWithConstantName (prefix, gucJsonVal keyVals)]
-  where
-    gucJsonVal :: [(ByteString, ByteString)] -> ByteString
-    gucJsonVal = LBS.toStrict . JSON.encode . HM.fromList . arrayByteStringToText
-    arrayByteStringToText :: [(ByteString, ByteString)] -> [(Text,Text)]
-    arrayByteStringToText keyVal = (T.decodeUtf8 *** T.decodeUtf8) <$> keyVal
+ where
+  gucJsonVal :: [(ByteString, ByteString)] -> ByteString
+  gucJsonVal = LBS.toStrict . JSON.encode . HM.fromList . arrayByteStringToText
+  arrayByteStringToText :: [(ByteString, ByteString)] -> [(Text, Text)]
+  arrayByteStringToText keyVal = (T.decodeUtf8 *** T.decodeUtf8) <$> keyVal
 
-handlerF :: Maybe Routine -> MediaHandler -> SQL.Snippet
+handlerF :: Maybe Routine -> MediaHandler -> TrackedSnippet
 handlerF rout = \case
-  BuiltinAggArrayJsonStrip   -> asJsonF rout True
+  BuiltinAggArrayJsonStrip -> asJsonF rout True
   BuiltinAggSingleJson strip -> asJsonSingleF rout strip
-  BuiltinOvAggJson           -> asJsonF rout False
-  BuiltinOvAggGeoJson        -> asGeoJsonF
-  BuiltinOvAggCsv            -> asCsvF
-  CustomFunc funcQi target   -> customFuncF rout funcQi target
-  NoAgg                      -> "''::text"
+  BuiltinOvAggJson -> asJsonF rout False
+  BuiltinOvAggGeoJson -> asGeoJsonF
+  BuiltinOvAggCsv -> asCsvF
+  CustomFunc funcQi target -> customFuncF rout funcQi target
+  NoAgg -> rawSQL "''::text"
