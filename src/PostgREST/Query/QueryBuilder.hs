@@ -1,6 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE RecordWildCards       #-}
 
 {- |
 Module      : PostgREST.Query.QueryBuilder
@@ -18,24 +18,22 @@ module PostgREST.Query.QueryBuilder (
   limitedQuery,
 ) where
 
-import qualified Data.Aeson as JSON
-import qualified Data.ByteString.Char8 as BS
-import qualified Data.HashMap.Strict as HM
+import qualified Data.Aeson                      as JSON
+import qualified Data.ByteString.Char8           as BS
+import qualified Data.HashMap.Strict             as HM
 import qualified Hasql.DynamicStatements.Snippet as SQL
-import qualified Hasql.Encoders as HE
+import qualified Hasql.Encoders                  as HE
 
 import Data.Maybe (fromJust)
-import Data.Tree (Tree (..))
+import Data.Tree  (Tree (..))
 
-import PostgREST.ApiRequest.Preferences (PreferResolution (..))
-import PostgREST.Config.PgVersion (PgVersion, pgVersion130)
-import PostgREST.SchemaCache.Identifiers (QualifiedIdentifier (..))
-import PostgREST.SchemaCache.Relationship (
-  Cardinality (..),
-  Junction (..),
-  Relationship (..),
- )
-import PostgREST.SchemaCache.Routine (RoutineParam (..))
+import PostgREST.ApiRequest.Preferences   (PreferResolution (..))
+import PostgREST.Config.PgVersion         (PgVersion, pgVersion130)
+import PostgREST.SchemaCache.Identifiers  (QualifiedIdentifier (..))
+import PostgREST.SchemaCache.Relationship (Cardinality (..),
+                                           Junction (..),
+                                           Relationship (..))
+import PostgREST.SchemaCache.Routine      (RoutineParam (..))
 
 import PostgREST.ApiRequest.Types
 import PostgREST.Plan.CallPlan
@@ -195,7 +193,7 @@ callPlanToQuery (FunctionCall qi params arguments returnsScalar returnsSetOfScal
  where
   jsonArgs = case arguments of
     DirectArgs args -> Just $ JSON.encode args
-    JsonArgs json -> json
+    JsonArgs json   -> json
   fromCall = case params of
     OnePosParam prm -> rawSQL "FROM " <> callIt (singleParameter jsonArgs $ encodeUtf8 $ ppType prm)
     KeyParams [] -> rawSQL "FROM " <> callIt mempty
@@ -281,7 +279,7 @@ readPlanToCountQuery (Node ReadPlan{from = mainQi, fromAlias = tblAlias, where_ 
    where
     notOp = if hasNot then "NOT" else mempty
     opSql And = " AND "
-    opSql Or = " OR "
+    opSql Or  = " OR "
   pgFmtLogicTreeCount _ (CoercibleStmnt (CoercibleFilterNullEmbed hasNot fld)) =
     maybe mempty (\x -> (if not hasNot then rawSQL "NOT " else mempty) <> rawSQL "EXISTS (" <> readPlanToCountQuery x <> rawSQL ")") (findNullEmbedRel fld)
   pgFmtLogicTreeCount qiCount (CoercibleStmnt flt) = pgFmtFilter qiCount flt

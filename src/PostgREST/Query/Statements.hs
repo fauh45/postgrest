@@ -15,26 +15,21 @@ module PostgREST.Query.Statements (
   ResultSet (..),
 ) where
 
-import qualified Data.Aeson.Lens as L
-import qualified Data.ByteString.Char8 as BS
-import qualified Hasql.Decoders as HD
+import qualified Data.Aeson.Lens                   as L
+import qualified Data.ByteString.Char8             as BS
+import qualified Hasql.Decoders                    as HD
 import qualified Hasql.DynamicStatements.Statement as SQL
-import qualified Hasql.Statement as SQL
+import qualified Hasql.Statement                   as SQL
 
 import Control.Lens ((^?))
 
 import PostgREST.ApiRequest.Preferences
-import PostgREST.MediaType (
-  MTVndPlanFormat (..),
-  MTVndPlanOption (..),
-  MediaType (..),
- )
+import PostgREST.MediaType              (MTVndPlanFormat (..),
+                                         MTVndPlanOption (..),
+                                         MediaType (..))
 import PostgREST.Query.SqlFragment
-import PostgREST.SchemaCache.Routine (
-  MediaHandler (..),
-  Routine,
-  funcReturnsSingle,
- )
+import PostgREST.SchemaCache.Routine    (MediaHandler (..), Routine,
+                                         funcReturnsSingle)
 
 import Protolude
 
@@ -45,16 +40,16 @@ data ResultSet
       -- ^ count of all the table rows
       , rsQueryTotal :: Int64
       -- ^ count of the query rows
-      , rsLocation :: [(BS.ByteString, BS.ByteString)]
+      , rsLocation   :: [(BS.ByteString, BS.ByteString)]
       -- ^ The Location header(only used for inserts) is represented as a list of strings containing
       -- variable bindings like @"k1=eq.42"@, or the empty list if there is no location header.
-      , rsBody :: BS.ByteString
+      , rsBody       :: BS.ByteString
       -- ^ the aggregated body of the query
       , rsGucHeaders :: Maybe BS.ByteString
       -- ^ the HTTP headers to be added to the response
-      , rsGucStatus :: Maybe Text
+      , rsGucStatus  :: Maybe Text
       -- ^ the HTTP status to be added to the response
-      , rsInserted :: Maybe Int64
+      , rsInserted   :: Maybe Int64
       -- ^ the number of rows inserted (Only used for upserts)
       }
   | -- | the plan of the query
@@ -162,7 +157,7 @@ prepareRead selectQuery countQuery countTotal mt handler prepared =
   decodeIt :: HD.Result ResultSet
   decodeIt = case mt of
     MTVndPlan{} -> planRow
-    _ -> HD.singleRow $ standardRow True
+    _           -> HD.singleRow $ standardRow True
 
 prepareCall ::
   Routine ->
@@ -249,11 +244,11 @@ mtSnippet mediaType sqlSnippet = case mediaType of
   _ -> sqlSnippet
  where
   fmtPlanOpt :: MTVndPlanOption -> BS.ByteString
-  fmtPlanOpt PlanAnalyze = "ANALYZE"
-  fmtPlanOpt PlanVerbose = "VERBOSE"
+  fmtPlanOpt PlanAnalyze  = "ANALYZE"
+  fmtPlanOpt PlanVerbose  = "VERBOSE"
   fmtPlanOpt PlanSettings = "SETTINGS"
-  fmtPlanOpt PlanBuffers = "BUFFERS"
-  fmtPlanOpt PlanWAL = "WAL"
+  fmtPlanOpt PlanBuffers  = "BUFFERS"
+  fmtPlanOpt PlanWAL      = "WAL"
 
   fmtPlanFmt PlanText = "FORMAT TEXT"
   fmtPlanFmt PlanJSON = "FORMAT JSON"

@@ -1,4 +1,4 @@
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE NamedFieldPuns  #-}
 {-# LANGUAGE RecordWildCards #-}
 
 -- TODO: This module shouldn't depend on SchemaCache
@@ -9,69 +9,57 @@ module PostgREST.Query (
   getSQLQuery,
 ) where
 
-import qualified Data.Aeson as JSON
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy.Char8 as LBS
-import qualified Data.HashMap.Strict as HM
-import qualified Data.Set as S
-import qualified Hasql.Decoders as HD
+import qualified Data.Aeson                        as JSON
+import qualified Data.Aeson.KeyMap                 as KM
+import qualified Data.ByteString                   as BS
+import qualified Data.ByteString.Lazy.Char8        as LBS
+import qualified Data.HashMap.Strict               as HM
+import qualified Data.Set                          as S
+import qualified Hasql.Decoders                    as HD
 import qualified Hasql.DynamicStatements.Statement as SQL
-import qualified Hasql.Session as SQL (Session)
-import qualified Hasql.Transaction as SQL
-import qualified Hasql.Transaction.Sessions as SQL
+import qualified Hasql.Session                     as SQL (Session)
+import qualified Hasql.Transaction                 as SQL
+import qualified Hasql.Transaction.Sessions        as SQL
 
-import qualified PostgREST.Error as Error
+import qualified PostgREST.Error              as Error
 import qualified PostgREST.Query.QueryBuilder as QueryBuilder
-import qualified PostgREST.Query.Statements as Statements
-import qualified PostgREST.SchemaCache as SchemaCache
+import qualified PostgREST.Query.Statements   as Statements
+import qualified PostgREST.SchemaCache        as SchemaCache
 
-import PostgREST.ApiRequest (
-  ApiRequest (..),
-  Mutation (..),
- )
-import PostgREST.ApiRequest.Preferences (
-  PreferCount (..),
-  PreferHandling (..),
-  PreferMaxAffected (..),
-  PreferTimezone (..),
-  PreferTransaction (..),
-  Preferences (..),
-  shouldCount,
- )
-import PostgREST.Auth.Types (AuthResult (..))
-import PostgREST.Config (
-  AppConfig (..),
-  OpenAPIMode (..),
- )
-import PostgREST.Config.PgVersion (PgVersion (..))
-import PostgREST.Error (Error)
-import PostgREST.MediaType (MediaType (..))
-import PostgREST.Plan (
-  ActionPlan (..),
-  CallReadPlan (..),
-  CrudPlan (..),
-  DbActionPlan (..),
-  InfoPlan (..),
-  InspectPlan (..),
- )
-import PostgREST.Plan.MutatePlan (MutatePlan (..))
-import PostgREST.Query.SqlFragment (
-  TrackedSnippet,
-  escapeIdentList,
-  fromQi,
-  intercalateSnippet,
-  rawSQL,
-  setConfigWithConstantName,
-  setConfigWithConstantNameJSON,
-  setConfigWithDynamicName,
-  toSnippet,
- )
-import PostgREST.Query.Statements (ResultSet (..))
-import PostgREST.SchemaCache (SchemaCache (..))
+import PostgREST.ApiRequest              (ApiRequest (..),
+                                          Mutation (..))
+import PostgREST.ApiRequest.Preferences  (PreferCount (..),
+                                          PreferHandling (..),
+                                          PreferMaxAffected (..),
+                                          PreferTimezone (..),
+                                          PreferTransaction (..),
+                                          Preferences (..),
+                                          shouldCount)
+import PostgREST.Auth.Types              (AuthResult (..))
+import PostgREST.Config                  (AppConfig (..),
+                                          OpenAPIMode (..))
+import PostgREST.Config.PgVersion        (PgVersion (..))
+import PostgREST.Error                   (Error)
+import PostgREST.MediaType               (MediaType (..))
+import PostgREST.Plan                    (ActionPlan (..),
+                                          CallReadPlan (..),
+                                          CrudPlan (..),
+                                          DbActionPlan (..),
+                                          InfoPlan (..),
+                                          InspectPlan (..))
+import PostgREST.Plan.MutatePlan         (MutatePlan (..))
+import PostgREST.Query.SqlFragment       (TrackedSnippet,
+                                          escapeIdentList, fromQi,
+                                          intercalateSnippet, rawSQL,
+                                          setConfigWithConstantName,
+                                          setConfigWithConstantNameJSON,
+                                          setConfigWithDynamicName,
+                                          toSnippet)
+import PostgREST.Query.Statements        (ResultSet (..))
+import PostgREST.SchemaCache             (SchemaCache (..))
 import PostgREST.SchemaCache.Identifiers (QualifiedIdentifier (..))
-import PostgREST.SchemaCache.Routine (Routine (..), RoutineMap)
-import PostgREST.SchemaCache.Table (TablesMap)
+import PostgREST.SchemaCache.Routine     (Routine (..), RoutineMap)
+import PostgREST.SchemaCache.Table       (TablesMap)
 
 import Protolude hiding (Handler)
 
@@ -110,8 +98,8 @@ query config AuthResult{..} apiReq (Db plan) sCache pgVer =
     mainActionQuery
 
 planTxMode :: DbActionPlan -> SQL.Mode
-planTxMode (DbCrud x) = pTxMode x
-planTxMode (DbCall x) = crTxMode x
+planTxMode (DbCrud x)  = pTxMode x
+planTxMode (DbCall x)  = crTxMode x
 planTxMode (MaybeDb x) = ipTxmode x
 
 planIsoLvl :: AppConfig -> ByteString -> DbActionPlan -> SQL.IsolationLevel
@@ -187,7 +175,7 @@ actionQuery (DbCrud MutateReadPlan{mrMedia = MTApplicationSQL, ..}) AppConfig{..
   mutateBody = case mrMutatePlan of
     Insert{insBody} -> LBS.toStrict <$> insBody
     Update{updBody} -> LBS.toStrict <$> updBody
-    Delete{} -> Nothing
+    Delete{}        -> Nothing
   mainActionQuery = do
     pure $ RawSQLResult mainSQLQuery mutateBody
 actionQuery (DbCrud plan@MutateReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences = Preferences{..}} _ _ =
@@ -356,7 +344,7 @@ setPgLocals dbActPlan AppConfig{..} claims role ApiRequest{..} =
      in setConfigWithConstantName ("search_path", schemas)
   funcSettings = case dbActPlan of
     DbCall CallReadPlan{crProc} -> pdFuncSettings crProc
-    _ -> mempty
+    _                           -> mempty
 
 -- | Runs the pre-request function.
 runPreReq :: AppConfig -> DbHandler ()
@@ -370,4 +358,4 @@ runPreReq conf = lift $ traverse_ (SQL.statement mempty . stmt) (configDbPreRequ
 
 getSQLQuery :: Query -> ByteString
 getSQLQuery DbQuery{dqSQL} = dqSQL
-getSQLQuery _ = mempty
+getSQLQuery _              = mempty

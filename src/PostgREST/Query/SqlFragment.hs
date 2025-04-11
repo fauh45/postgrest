@@ -1,6 +1,6 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase     #-}
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes    #-}
 
 {- |
 Module      : PostgREST.Query.SqlFragment
@@ -52,78 +52,63 @@ module PostgREST.Query.SqlFragment (
   escapeIdentList,
 ) where
 
-import qualified Data.Aeson as JSON
-import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.HashMap.Strict as HM
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
+import qualified Data.Aeson                      as JSON
+import qualified Data.ByteString.Char8           as BS
+import qualified Data.ByteString.Lazy            as LBS
+import qualified Data.HashMap.Strict             as HM
+import qualified Data.Text                       as T
+import qualified Data.Text.Encoding              as T
 import qualified Hasql.DynamicStatements.Snippet as SQL
-import qualified Hasql.Encoders as HE
+import qualified Hasql.Encoders                  as HE
 
 import Control.Arrow ((***))
 
-import Data.Foldable (foldr1)
+import Data.Foldable     (foldr1)
 import NeatInterpolation (trimming)
 
-import PostgREST.ApiRequest.Types (
-  AggregateFunction (..),
-  Alias,
-  Cast,
-  FtsOperator (..),
-  IsVal (..),
-  JsonOperand (..),
-  JsonOperation (..),
-  JsonPath,
-  LogicOperator (..),
-  OpExpr (..),
-  OpQuantifier (..),
-  Operation (..),
-  OrderDirection (..),
-  OrderNulls (..),
-  QuantOperator (..),
-  SimpleOperator (..),
- )
-import PostgREST.MediaType (
-  MTVndPlanFormat (..),
-  MTVndPlanOption (..),
- )
-import PostgREST.Plan.ReadPlan (JoinCondition (..))
-import PostgREST.Plan.Types (
-  CoercibleField (..),
-  CoercibleFilter (..),
-  CoercibleLogicTree (..),
-  CoercibleOrderTerm (..),
-  CoercibleSelectField (..),
-  RelSelectField (..),
-  SpreadSelectField (..),
-  ToTsVector (..),
-  unknownField,
- )
-import PostgREST.RangeQuery (
-  NonnegRange,
-  allRange,
-  rangeLimit,
-  rangeOffset,
- )
-import PostgREST.SchemaCache.Identifiers (
-  FieldName,
-  QualifiedIdentifier (..),
-  RelIdentifier (..),
- )
-import PostgREST.SchemaCache.Routine (
-  MediaHandler (..),
-  Routine (..),
-  funcReturnsScalar,
-  funcReturnsSetOfScalar,
-  funcReturnsSingleComposite,
- )
+import PostgREST.ApiRequest.Types        (AggregateFunction (..),
+                                          Alias, Cast,
+                                          FtsOperator (..),
+                                          IsVal (..),
+                                          JsonOperand (..),
+                                          JsonOperation (..),
+                                          JsonPath,
+                                          LogicOperator (..),
+                                          OpExpr (..),
+                                          OpQuantifier (..),
+                                          Operation (..),
+                                          OrderDirection (..),
+                                          OrderNulls (..),
+                                          QuantOperator (..),
+                                          SimpleOperator (..))
+import PostgREST.MediaType               (MTVndPlanFormat (..),
+                                          MTVndPlanOption (..))
+import PostgREST.Plan.ReadPlan           (JoinCondition (..))
+import PostgREST.Plan.Types              (CoercibleField (..),
+                                          CoercibleFilter (..),
+                                          CoercibleLogicTree (..),
+                                          CoercibleOrderTerm (..),
+                                          CoercibleSelectField (..),
+                                          RelSelectField (..),
+                                          SpreadSelectField (..),
+                                          ToTsVector (..),
+                                          unknownField)
+import PostgREST.RangeQuery              (NonnegRange, allRange,
+                                          rangeLimit, rangeOffset)
+import PostgREST.SchemaCache.Identifiers (FieldName,
+                                          QualifiedIdentifier (..),
+                                          RelIdentifier (..))
+import PostgREST.SchemaCache.Routine     (MediaHandler (..),
+                                          Routine (..),
+                                          funcReturnsScalar,
+                                          funcReturnsSetOfScalar,
+                                          funcReturnsSingleComposite)
 
 import Protolude hiding (Sum, cast)
 
 data TrackedSnippet = TrackedSnippet
   { snippet :: SQL.Snippet
-  , params :: [Maybe ByteString] -- (Encoder, Description/Value)
+  , params  :: [Maybe ByteString] -- (Encoder, Description/Value)
   }
 
 -- | Access params of the TrackedSnippet
@@ -339,7 +324,7 @@ fromQi t =
 
 pgFmtColumn :: QualifiedIdentifier -> Text -> TrackedSnippet
 pgFmtColumn table "*" = fromQi table <> rawSQL ".*"
-pgFmtColumn table c = fromQi table <> rawSQL "." <> pgFmtIdent c
+pgFmtColumn table c   = fromQi table <> rawSQL "." <> pgFmtIdent c
 
 pgFmtCallUnary :: Text -> TrackedSnippet -> TrackedSnippet
 pgFmtCallUnary f (TrackedSnippet x params) =
@@ -405,7 +390,7 @@ pgFmtApplyCast (Just cast) (TrackedSnippet snip params) =
 pgFmtFullSelName :: Alias -> FieldName -> TrackedSnippet
 pgFmtFullSelName aggAlias fieldName = case fieldName of
   "*" -> pgFmtIdent aggAlias <> rawSQL ".*"
-  _ -> pgFmtIdent aggAlias <> rawSQL "." <> pgFmtIdent fieldName
+  _   -> pgFmtIdent aggAlias <> rawSQL "." <> pgFmtIdent fieldName
 
 -- TODO: At this stage there shouldn't be a Maybe since ApiRequest should ensure that an INSERT/UPDATE has a body
 fromJsonBodyF :: Maybe LBS.ByteString -> [CoercibleField] -> Bool -> Bool -> Bool -> TrackedSnippet
@@ -471,11 +456,11 @@ pgFmtOrderTerm qi ot =
     CoercibleOrderTerm{coField = cof} -> pgFmtField qi cof
     CoercibleOrderRelationTerm{coRelation, coRelTerm = (fn, jp)} -> pgFmtField (QualifiedIdentifier mempty coRelation) (unknownField fn jp)
 
-  direction OrderAsc = "ASC"
+  direction OrderAsc  = "ASC"
   direction OrderDesc = "DESC"
 
   nullOrder OrderNullsFirst = "NULLS FIRST"
-  nullOrder OrderNullsLast = "NULLS LAST"
+  nullOrder OrderNullsLast  = "NULLS LAST"
 
 -- | Interpret a literal in the way the planner indicated through the CoercibleField.
 pgFmtUnknownLiteralForField :: TrackedSnippet -> CoercibleField -> TrackedSnippet
@@ -513,10 +498,10 @@ pgFmtFilter table (CoercibleFilter fld (OpExpr hasNot oper)) =
     Is isVal ->
       rawSQL " IS "
         <> case isVal of
-          IsNull -> rawSQL "NULL"
-          IsNotNull -> rawSQL "NOT NULL"
-          IsTriTrue -> rawSQL "TRUE"
-          IsTriFalse -> rawSQL "FALSE"
+          IsNull       -> rawSQL "NULL"
+          IsNotNull    -> rawSQL "NOT NULL"
+          IsTriTrue    -> rawSQL "TRUE"
+          IsTriFalse   -> rawSQL "FALSE"
           IsTriUnknown -> rawSQL "UNKNOWN"
     IsDistinctFrom val -> rawSQL " IS DISTINCT FROM " <> unknownLiteral val
     -- We don't use "IN", we use "= ANY". IN has the following disadvantages:
@@ -533,7 +518,7 @@ pgFmtFilter table (CoercibleFilter fld (OpExpr hasNot oper)) =
   fmtQuant q val = case q of
     Just QuantAny -> rawSQL "ANY(" <> val <> rawSQL ")"
     Just QuantAll -> rawSQL "ALL(" <> val <> rawSQL ")"
-    Nothing -> val
+    Nothing       -> val
 
 pgFmtFtsLang :: Maybe Text -> TrackedSnippet
 pgFmtFtsLang = maybe emptyTracked (\l -> unknownLiteral l <> rawSQL ", ")
@@ -548,7 +533,7 @@ pgFmtLogicTree qi (CoercibleExpr hasNot op forest) = rawSQL notOp <> rawSQL " ("
   notOp = if hasNot then "NOT" else mempty
 
   opSql And = " AND "
-  opSql Or = " OR "
+  opSql Or  = " OR "
 pgFmtLogicTree qi (CoercibleStmnt flt) = pgFmtFilter qi flt
 
 pgFmtJsonPath :: JsonPath -> TrackedSnippet
@@ -561,7 +546,7 @@ pgFmtJsonPath = \case
   pgFmtJsonOperand (JIdx i) = unknownLiteral i <> rawSQL "::int"
 
 pgFmtAs :: Maybe Alias -> TrackedSnippet
-pgFmtAs Nothing = emptyTracked
+pgFmtAs Nothing      = emptyTracked
 pgFmtAs (Just alias) = rawSQL " AS " <> pgFmtIdent alias
 
 groupF :: QualifiedIdentifier -> [CoercibleSelectField] -> [RelSelectField] -> TrackedSnippet
@@ -668,11 +653,11 @@ explainF fmt opts (TrackedSnippet snip params) =
     params
  where
   fmtPlanOpt :: MTVndPlanOption -> BS.ByteString
-  fmtPlanOpt PlanAnalyze = "ANALYZE"
-  fmtPlanOpt PlanVerbose = "VERBOSE"
+  fmtPlanOpt PlanAnalyze  = "ANALYZE"
+  fmtPlanOpt PlanVerbose  = "VERBOSE"
   fmtPlanOpt PlanSettings = "SETTINGS"
-  fmtPlanOpt PlanBuffers = "BUFFERS"
-  fmtPlanOpt PlanWAL = "WAL"
+  fmtPlanOpt PlanBuffers  = "BUFFERS"
+  fmtPlanOpt PlanWAL      = "WAL"
 
   fmtPlanFmt PlanText = "FORMAT TEXT"
   fmtPlanFmt PlanJSON = "FORMAT JSON"
