@@ -25,7 +25,7 @@ import qualified Hasql.Statement                   as SQL
 import Control.Lens ((^?))
 
 import PostgREST.ApiRequest.Preferences
-import PostgREST.MediaType              (MTVndPlanFormat (..),
+import PostgREST.MediaType              (MTVndPlanFormat (..), MTVndPlanOption (..),
                                          MediaType (..))
 import PostgREST.Query.SqlFragment
 import PostgREST.SchemaCache.Routine    (MediaHandler (..), Routine,
@@ -55,38 +55,38 @@ data ResultSet
   | RSPlan BS.ByteString -- ^ the plan of the query
 
 
-prepareWrite :: SQL.Snippet -> SQL.Snippet -> Bool -> Bool -> MediaType -> MediaHandler ->
+prepareWrite :: TrackedSnippet -> TrackedSnippet -> Bool -> Bool -> MediaType -> MediaHandler ->
                 Maybe PreferRepresentation -> Maybe PreferResolution -> [Text] -> Bool -> (SQL.Statement () ResultSet, ByteString)
 prepareWrite selectQuery mutateQuery isInsert isPut mt handler rep resolution pKeys prepared =
  (result, sql)
  where
-  result@(SQL.Statement sql _ _ _) = SQL.dynamicallyParameterized (mtSnippet mt snippet) decodeIt prepared
-  checkUpsert snip = if isInsert && (isPut || resolution == Just MergeDuplicates) then snip else "''"
-  pgrstInsertedF = checkUpsert "nullif(current_setting('pgrst.inserted', true),'')::int"
-  snippet =
-    "WITH " <> sourceCTE <> " AS (" <> mutateQuery <> ") " <>
-    "SELECT " <>
-      "'' AS total_result_set, " <>
-      "pg_catalog.count(_postgrest_t) AS page_total, " <>
-      locF <> " AS header, " <>
-      handlerF Nothing handler <> " AS body, " <>
-      responseHeadersF <> " AS response_headers, " <>
-      responseStatusF  <> " AS response_status, " <>
-      pgrstInsertedF <> " AS response_inserted " <>
-    "FROM (" <> selectF <> ") _postgrest_t"
+  result@(SQL.Statement sql _ _ _) = SQL.dynamicallyParameterized (mtSnippet mt $ toSnippet querySnippet) decodeIt prepared
+  checkUpsert snip = if isInsert && (isPut || resolution == Just MergeDuplicates) then snip else rawSQL "''"
+  pgrstInsertedF = checkUpsert $ rawSQL "nullif(current_setting('pgrst.inserted', true),'')::int"
+  querySnippet =
+    rawSQL "WITH " <> sourceCTE <> rawSQL " AS (" <> mutateQuery <> rawSQL ") " <>
+    rawSQL "SELECT " <>
+      rawSQL "'' AS total_result_set, " <>
+      rawSQL "pg_catalog.count(_postgrest_t) AS page_total, " <>
+      locF <> rawSQL " AS header, " <>
+      handlerF Nothing handler <> rawSQL " AS body, " <>
+      responseHeadersF <> rawSQL " AS response_headers, " <>
+      responseStatusF  <> rawSQL " AS response_status, " <>
+      pgrstInsertedF <> rawSQL " AS response_inserted " <>
+    rawSQL "FROM (" <> selectF <> rawSQL ") _postgrest_t"
 
   locF =
     if isInsert && rep == Just HeadersOnly
       then
-        "CASE WHEN pg_catalog.count(_postgrest_t) = 1 " <>
-          "THEN coalesce(" <> locationF pKeys <> ", " <> noLocationF <> ") " <>
-          "ELSE " <> noLocationF <> " " <>
-        "END"
+        rawSQL "CASE WHEN pg_catalog.count(_postgrest_t) = 1 " <>
+          rawSQL "THEN coalesce(" <> locationF pKeys <> rawSQL ", " <> noLocationF <> rawSQL ") " <>
+          rawSQL "ELSE " <> noLocationF <> rawSQL " " <>
+        rawSQL "END"
       else noLocationF
 
   selectF
     -- prevent using any of the column names in ?select= when no response is returned from the CTE
-    | handler == NoAgg = "SELECT * FROM " <> sourceCTE
+    | handler == NoAgg = rawSQL "SELECT * FROM " <> sourceCTE
     | otherwise        = selectQuery
 
   decodeIt :: HD.Result ResultSet
@@ -94,22 +94,22 @@ prepareWrite selectQuery mutateQuery isInsert isPut mt handler rep resolution pK
     MTVndPlan{} -> planRow
     _           -> fromMaybe (RSStandard Nothing 0 mempty mempty Nothing Nothing Nothing) <$> HD.rowMaybe (standardRow False)
 
-prepareRead :: SQL.Snippet -> SQL.Snippet -> Bool -> MediaType -> MediaHandler -> Bool -> (SQL.Statement () ResultSet, ByteString)
+prepareRead :: TrackedSnippet -> TrackedSnippet -> Bool -> MediaType -> MediaHandler -> Bool -> (SQL.Statement () ResultSet, ByteString)
 prepareRead selectQuery countQuery countTotal mt handler prepared =
  (result, sql)
  where
-  result@(SQL.Statement sql _ _ _) = SQL.dynamicallyParameterized (mtSnippet mt snippet) decodeIt prepared
-  snippet =
-    "WITH " <> sourceCTE <> " AS ( " <> selectQuery <> " ) " <>
-    countCTEF <> " " <>
-    "SELECT " <>
-      countResultF <> " AS total_result_set, " <>
-      "pg_catalog.count(_postgrest_t) AS page_total, " <>
-      handlerF Nothing handler <> " AS body, " <>
-      responseHeadersF <> " AS response_headers, " <>
-      responseStatusF <> " AS response_status, " <>
-      "''" <> " AS response_inserted " <>
-    "FROM ( SELECT * FROM " <> sourceCTE <> " ) _postgrest_t"
+  result@(SQL.Statement sql _ _ _) = SQL.dynamicallyParameterized (mtSnippet mt $ toSnippet querySnippet) decodeIt prepared
+  querySnippet =
+    rawSQL "WITH " <> sourceCTE <> rawSQL " AS ( " <> selectQuery <> rawSQL " ) " <>
+    countCTEF <> rawSQL " " <>
+    rawSQL "SELECT " <>
+      countResultF <> rawSQL " AS total_result_set, " <>
+      rawSQL "pg_catalog.count(_postgrest_t) AS page_total, " <>
+      handlerF Nothing handler <> rawSQL " AS body, " <>
+      responseHeadersF <> rawSQL " AS response_headers, " <>
+      responseStatusF <> rawSQL " AS response_status, " <>
+      rawSQL "''" <> rawSQL " AS response_inserted " <>
+    rawSQL "FROM ( SELECT * FROM " <> sourceCTE <> rawSQL " ) _postgrest_t"
 
   (countCTEF, countResultF) = countF countQuery countTotal
 
@@ -118,26 +118,26 @@ prepareRead selectQuery countQuery countTotal mt handler prepared =
     MTVndPlan{} -> planRow
     _           -> HD.singleRow $ standardRow True
 
-prepareCall :: Routine -> SQL.Snippet -> SQL.Snippet -> SQL.Snippet -> Bool ->
+prepareCall :: Routine -> TrackedSnippet -> TrackedSnippet -> TrackedSnippet -> Bool ->
                MediaType -> MediaHandler -> Bool ->
                (SQL.Statement () ResultSet, ByteString)
 prepareCall rout callProcQuery selectQuery countQuery countTotal mt handler prepared =
   (result, sql)
   where
-    result@(SQL.Statement sql _ _ _) = SQL.dynamicallyParameterized (mtSnippet mt snippet) decodeIt prepared
-    snippet =
-      "WITH " <> sourceCTE <> " AS (" <> callProcQuery <> ") " <>
+    result@(SQL.Statement sql _ _ _) = SQL.dynamicallyParameterized (mtSnippet mt $ toSnippet querySnippet) decodeIt prepared
+    querySnippet =
+      rawSQL "WITH " <> sourceCTE <> rawSQL " AS (" <> callProcQuery <> rawSQL ") " <>
       countCTEF <>
-      "SELECT " <>
-        countResultF <> " AS total_result_set, " <>
+      rawSQL "SELECT " <>
+        countResultF <> rawSQL " AS total_result_set, " <>
         (if funcReturnsSingle rout
-          then "1"
-          else "pg_catalog.count(_postgrest_t)") <> " AS page_total, " <>
-        handlerF (Just rout) handler <> " AS body, " <>
-        responseHeadersF <> " AS response_headers, " <>
-        responseStatusF <> " AS response_status, " <>
-        "''" <> " AS response_inserted " <>
-      "FROM (" <> selectQuery <> ") _postgrest_t"
+          then rawSQL "1"
+          else rawSQL "pg_catalog.count(_postgrest_t)") <> rawSQL " AS page_total, " <>
+        handlerF (Just rout) handler <> rawSQL " AS body, " <>
+        responseHeadersF <> rawSQL " AS response_headers, " <>
+        responseStatusF <> rawSQL " AS response_status, " <>
+        rawSQL "''" <> rawSQL " AS response_inserted " <>
+      rawSQL "FROM (" <> selectQuery <> rawSQL ") _postgrest_t"
 
     (countCTEF, countResultF) = countF countQuery countTotal
 
@@ -146,11 +146,11 @@ prepareCall rout callProcQuery selectQuery countQuery countTotal mt handler prep
       MTVndPlan{} -> planRow
       _           -> fromMaybe (RSStandard (Just 0) 0 mempty mempty Nothing Nothing Nothing) <$> HD.rowMaybe (standardRow True)
 
-preparePlanRows :: SQL.Snippet -> Bool -> SQL.Statement () (Maybe Int64)
+preparePlanRows :: TrackedSnippet -> Bool -> SQL.Statement () (Maybe Int64)
 preparePlanRows countQuery =
-  SQL.dynamicallyParameterized snippet decodeIt
+  SQL.dynamicallyParameterized (toSnippet explainSnippet) decodeIt
   where
-    snippet = explainF PlanJSON mempty countQuery
+    explainSnippet = explainF PlanJSON mempty countQuery
     decodeIt :: HD.Result (Maybe Int64)
     decodeIt =
       let row = HD.singleRow $ column HD.bytea in
@@ -171,9 +171,22 @@ standardRow noLocation =
       (k, BS.tail v)
 
 mtSnippet :: MediaType -> SQL.Snippet -> SQL.Snippet
-mtSnippet mediaType snippet = case mediaType of
-  MTVndPlan _ fmt opts -> explainF fmt opts snippet
-  _                    -> snippet
+mtSnippet mediaType sqlSnippet = case mediaType of
+  MTVndPlan _ fmt opts -> SQL.sql "EXPLAIN (" 
+                         <> SQL.sql (BS.intercalate ", " (fmtPlanFmt fmt : (fmtPlanOpt <$> opts)))
+                         <> SQL.sql ") " 
+                         <> sqlSnippet
+  _                    -> sqlSnippet
+  where
+    fmtPlanOpt :: MTVndPlanOption -> BS.ByteString
+    fmtPlanOpt PlanAnalyze = "ANALYZE"
+    fmtPlanOpt PlanVerbose = "VERBOSE"
+    fmtPlanOpt PlanSettings = "SETTINGS"
+    fmtPlanOpt PlanBuffers = "BUFFERS"
+    fmtPlanOpt PlanWAL = "WAL"
+
+    fmtPlanFmt PlanText = "FORMAT TEXT"
+    fmtPlanFmt PlanJSON = "FORMAT JSON"
 
 -- | We use rowList because when doing EXPLAIN (FORMAT TEXT), the result comes as many rows. FORMAT JSON comes as one.
 planRow :: HD.Result ResultSet
