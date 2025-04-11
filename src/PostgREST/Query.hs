@@ -80,7 +80,7 @@ data QueryResult
   | DbCallResult CallReadPlan ResultSet
   | MaybeDbResult InspectPlan (Maybe (TablesMap, RoutineMap, Maybe Text))
   | NoDbResult InfoPlan
-  | RawSQLResult ByteString (Maybe ByteString)
+  | RawSQLResult ByteString [Maybe ByteString]
 
 query :: AppConfig -> AuthResult -> ApiRequest -> ActionPlan -> SchemaCache -> PgVersion -> Query
 query _ _ _ (NoDb x) _ _ = NoDbQuery $ NoDbResult x
@@ -116,7 +116,7 @@ actionQuery (DbCrud WrappedReadPlan{wrMedia = MTApplicationSQL, ..}) AppConfig{.
   (mainActionQuery, mainSQLQuery)
  where
   countQuery = QueryBuilder.readPlanToCountQuery wrReadPlan
-  (_, mainSQLQuery, _) =
+  (_, mainSQLQuery, params) =
     Statements.prepareRead
       (QueryBuilder.readPlanToQuery wrReadPlan)
       ( if preferCount == Just EstimatedCount
@@ -131,7 +131,7 @@ actionQuery (DbCrud WrappedReadPlan{wrMedia = MTApplicationSQL, ..}) AppConfig{.
       wrHandler
       configDbPreparedStatements
   mainActionQuery = do
-    pure $ RawSQLResult mainSQLQuery Nothing
+    pure $ RawSQLResult mainSQLQuery params
 actionQuery (DbCrud plan@WrappedReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences = Preferences{..}} _ _ =
   (mainActionQuery, mainSQLQuery)
  where
@@ -159,7 +159,7 @@ actionQuery (DbCrud MutateReadPlan{mrMedia = MTApplicationSQL, ..}) AppConfig{..
   (mainActionQuery, mainSQLQuery)
  where
   (isPut, isInsert, pkCols) = case mrMutatePlan of Insert{where_, insPkCols} -> ((not . null) where_, True, insPkCols); _ -> (False, False, mempty)
-  (_, mainSQLQuery, _) =
+  (_, mainSQLQuery, params) =
     Statements.prepareWrite
       (QueryBuilder.readPlanToQuery mrReadPlan)
       (QueryBuilder.mutatePlanToQuery mrMutatePlan)
@@ -171,13 +171,8 @@ actionQuery (DbCrud MutateReadPlan{mrMedia = MTApplicationSQL, ..}) AppConfig{..
       preferResolution
       pkCols
       configDbPreparedStatements
-  -- NOTE: help on this please
-  mutateBody = case mrMutatePlan of
-    Insert{insBody} -> LBS.toStrict <$> insBody
-    Update{updBody} -> LBS.toStrict <$> updBody
-    Delete{}        -> Nothing
   mainActionQuery = do
-    pure $ RawSQLResult mainSQLQuery mutateBody
+    pure $ RawSQLResult mainSQLQuery params
 actionQuery (DbCrud plan@MutateReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences = Preferences{..}} _ _ =
   (mainActionQuery, mainSQLQuery)
  where

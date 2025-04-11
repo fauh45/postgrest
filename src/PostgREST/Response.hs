@@ -1,4 +1,4 @@
-{-# LANGUAGE NamedFieldPuns  #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RecordWildCards #-}
 
 {- |
@@ -10,56 +10,66 @@ module PostgREST.Response (
   PgrstResponse (..),
 ) where
 
-import qualified Data.Aeson                as JSON
-import qualified Data.ByteString.Char8     as BS
-import qualified Data.ByteString.Lazy      as LBS
-import qualified Data.HashMap.Strict       as HM
-import           Data.Maybe                (fromJust)
-import           Data.Text.Read            (decimal)
+import qualified Data.Aeson as JSON
+import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.HashMap.Strict as HM
+import Data.Maybe (fromJust)
+import Data.Text.Read (decimal)
 import qualified Network.HTTP.Types.Header as HTTP
 import qualified Network.HTTP.Types.Status as HTTP
-import qualified Network.HTTP.Types.URI    as HTTP
+import qualified Network.HTTP.Types.URI as HTTP
 
-import qualified PostgREST.Error            as Error
-import qualified PostgREST.MediaType        as MediaType
-import qualified PostgREST.RangeQuery       as RangeQuery
+import qualified PostgREST.Error as Error
+import qualified PostgREST.MediaType as MediaType
+import qualified PostgREST.RangeQuery as RangeQuery
 import qualified PostgREST.Response.OpenAPI as OpenAPI
 
-import PostgREST.ApiRequest              (ApiRequest (..),
-                                          InvokeMethod (..),
-                                          Mutation (..))
-import PostgREST.ApiRequest.Preferences  (PreferRepresentation (..),
-                                          PreferResolution (..),
-                                          Preferences (..),
-                                          prefAppliedHeader,
-                                          shouldCount)
-import PostgREST.ApiRequest.QueryParams  (QueryParams (..))
-import PostgREST.Config                  (AppConfig (..))
-import PostgREST.MediaType               (MediaType (..))
-import PostgREST.Plan                    (CallReadPlan (..),
-                                          CrudPlan (..),
-                                          InfoPlan (..),
-                                          InspectPlan (..))
-import PostgREST.Plan.MutatePlan         (MutatePlan (..))
-import PostgREST.Query                   (QueryResult (..))
-import PostgREST.Query.Statements        (ResultSet (..))
-import PostgREST.Response.GucHeader      (GucHeader, unwrapGucHeader)
-import PostgREST.SchemaCache             (SchemaCache (..))
-import PostgREST.SchemaCache.Identifiers (QualifiedIdentifier (..),
-                                          Schema)
-import PostgREST.SchemaCache.Routine     (FuncVolatility (..),
-                                          Routine (..))
-import PostgREST.SchemaCache.Table       (Table (..))
+import PostgREST.ApiRequest (
+  ApiRequest (..),
+  InvokeMethod (..),
+  Mutation (..),
+ )
+import PostgREST.ApiRequest.Preferences (
+  PreferRepresentation (..),
+  PreferResolution (..),
+  Preferences (..),
+  prefAppliedHeader,
+  shouldCount,
+ )
+import PostgREST.ApiRequest.QueryParams (QueryParams (..))
+import PostgREST.Config (AppConfig (..))
+import PostgREST.MediaType (MediaType (..))
+import PostgREST.Plan (
+  CallReadPlan (..),
+  CrudPlan (..),
+  InfoPlan (..),
+  InspectPlan (..),
+ )
+import PostgREST.Plan.MutatePlan (MutatePlan (..))
+import PostgREST.Query (QueryResult (..))
+import PostgREST.Query.Statements (ResultSet (..))
+import PostgREST.Response.GucHeader (GucHeader, unwrapGucHeader)
+import PostgREST.SchemaCache (SchemaCache (..))
+import PostgREST.SchemaCache.Identifiers (
+  QualifiedIdentifier (..),
+  Schema,
+ )
+import PostgREST.SchemaCache.Routine (
+  FuncVolatility (..),
+  Routine (..),
+ )
+import PostgREST.SchemaCache.Table (Table (..))
 
 import qualified PostgREST.SchemaCache.Routine as Routine
 
-import Protolude      hiding (Handler, toS)
+import Protolude hiding (Handler, toS)
 import Protolude.Conv (toS)
 
 data PgrstResponse = PgrstResponse
-  { pgrstStatus  :: HTTP.Status
+  { pgrstStatus :: HTTP.Status
   , pgrstHeaders :: [HTTP.Header]
-  , pgrstBody    :: LBS.ByteString
+  , pgrstBody :: LBS.ByteString
   }
 
 actionResponse :: QueryResult -> ApiRequest -> (Text, Text) -> AppConfig -> SchemaCache -> Schema -> Bool -> Either Error.Error PgrstResponse
@@ -69,11 +79,16 @@ actionResponse (RawSQLResult rawSQL body) _ _ _ _ _ _ =
       HTTP.status200
       [MediaType.toContentType MTApplicationJSON]
       ( JSON.encode
-          ( HM.fromList
-              [ ("sql" :: Text, toS rawSQL)
-              , ("body" :: Text, maybe "" toS body)
-              ] ::
-              HM.HashMap Text Text
+          ( do
+              let sqlText = toS rawSQL :: Text
+              let bodyTexts = map (maybe "" toS) body :: [Text]
+              let obj =
+                    HM.fromList
+                      [ ("sql" :: Text, JSON.toJSON sqlText)
+                      , ("body" :: Text, JSON.toJSON bodyTexts)
+                      ] ::
+                      HM.HashMap Text JSON.Value
+              obj
           )
       )
 actionResponse (DbCrudResult WrappedReadPlan{wrMedia, wrHdrsOnly = headersOnly, crudQi = identifier} resultSet) ctxApiRequest@ApiRequest{iPreferences = Preferences{..}, ..} _ _ _ _ _ =
