@@ -10,6 +10,7 @@ module PostgREST.Query.SqlFragment (
   TrackedSnippet (..),
   emptyTracked,
   trackParam,
+  trackedParams,
   trackParams,
   rawSQL,
   fromSnippet,
@@ -124,6 +125,10 @@ data TrackedSnippet = TrackedSnippet
   { snippet :: SQL.Snippet
   , params :: [Maybe ByteString] -- (Encoder, Description/Value)
   }
+
+-- | Access params of the TrackedSnippet
+trackedParams :: TrackedSnippet -> [Maybe ByteString]
+trackedParams = params
 
 -- | Create an empty tracked snippet
 emptyTracked :: TrackedSnippet

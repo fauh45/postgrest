@@ -128,7 +128,7 @@ actionQuery (DbCrud WrappedReadPlan{wrMedia = MTApplicationSQL, ..}) AppConfig{.
   (mainActionQuery, mainSQLQuery)
  where
   countQuery = QueryBuilder.readPlanToCountQuery wrReadPlan
-  (_, mainSQLQuery) =
+  (_, mainSQLQuery, _) =
     Statements.prepareRead
       (QueryBuilder.readPlanToQuery wrReadPlan)
       ( if preferCount == Just EstimatedCount
@@ -148,7 +148,7 @@ actionQuery (DbCrud plan@WrappedReadPlan{..}) conf@AppConfig{..} apiReq@ApiReque
   (mainActionQuery, mainSQLQuery)
  where
   countQuery = QueryBuilder.readPlanToCountQuery wrReadPlan
-  (result, mainSQLQuery) =
+  (result, mainSQLQuery, _) =
     Statements.prepareRead
       (QueryBuilder.readPlanToQuery wrReadPlan)
       ( if preferCount == Just EstimatedCount
@@ -171,7 +171,7 @@ actionQuery (DbCrud MutateReadPlan{mrMedia = MTApplicationSQL, ..}) AppConfig{..
   (mainActionQuery, mainSQLQuery)
  where
   (isPut, isInsert, pkCols) = case mrMutatePlan of Insert{where_, insPkCols} -> ((not . null) where_, True, insPkCols); _ -> (False, False, mempty)
-  (_, mainSQLQuery) =
+  (_, mainSQLQuery, _) =
     Statements.prepareWrite
       (QueryBuilder.readPlanToQuery mrReadPlan)
       (QueryBuilder.mutatePlanToQuery mrMutatePlan)
@@ -194,7 +194,7 @@ actionQuery (DbCrud plan@MutateReadPlan{..}) conf@AppConfig{..} apiReq@ApiReques
   (mainActionQuery, mainSQLQuery)
  where
   (isPut, isInsert, pkCols) = case mrMutatePlan of Insert{where_, insPkCols} -> ((not . null) where_, True, insPkCols); _ -> (False, False, mempty)
-  (result, mainSQLQuery) =
+  (result, mainSQLQuery, _) =
     Statements.prepareWrite
       (QueryBuilder.readPlanToQuery mrReadPlan)
       (QueryBuilder.mutatePlanToQuery mrMutatePlan)
@@ -225,7 +225,7 @@ actionQuery (DbCrud plan@MutateReadPlan{..}) conf@AppConfig{..} apiReq@ApiReques
 actionQuery (DbCall plan@CallReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences = Preferences{..}} pgVer _ =
   (mainActionQuery, mainSQLQuery)
  where
-  (result, mainSQLQuery) =
+  (result, mainSQLQuery, _) =
     Statements.prepareCall
       crProc
       (QueryBuilder.callPlanToQuery crCallPlan pgVer)
