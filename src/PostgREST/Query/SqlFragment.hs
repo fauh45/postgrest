@@ -433,7 +433,7 @@ fromJsonBodyF body fields includeSelect includeLimitOne includeDefaults =
     if includeDefaults
       then ("pgrst_json_defs.val", "jsonb_array_elements", if isJsonObject then "jsonb_to_record" else "jsonb_to_recordset")
       else ("pgrst_payload.json_data", "json_array_elements", if isJsonObject then "json_to_record" else "json_to_recordset")
-  jsonPlaceHolder = trackParam "JSON body" $ SQL.encoderAndParam (HE.nullable $ if includeDefaults then HE.jsonbLazyBytes else HE.jsonLazyBytes) body
+  jsonPlaceHolder = TrackedSnippet (SQL.encoderAndParam (HE.nullable $ if includeDefaults then HE.jsonbLazyBytes else HE.jsonLazyBytes) body) [LBS.toStrict <$> body]
   isJsonObject =
     -- light validation as pg's json_to_record(set) already validates that the body is valid JSON. We just need to know whether the body looks like an object or not.
     let
