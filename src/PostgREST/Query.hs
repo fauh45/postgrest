@@ -80,7 +80,7 @@ data QueryResult
   | DbCallResult  CallReadPlan  ResultSet
   | MaybeDbResult InspectPlan  (Maybe (TablesMap, RoutineMap, Maybe Text))
   | NoDbResult    InfoPlan
-  | RawSQLResult ByteString [Maybe ByteString]
+  | RawSQLResult ByteString [Maybe ByteString] Bool
 
 query :: AppConfig -> AuthResult -> ApiRequest -> ActionPlan -> SchemaCache -> PgVersion -> Query
 query _ _ _ (NoDb x) _ _ = NoDbQuery $ NoDbResult x
@@ -129,7 +129,7 @@ actionQuery (DbCrud WrappedReadPlan{wrMedia = MTApplicationJSONSQL, ..}) AppConf
       wrHandler
       configDbPreparedStatements
     mainActionQuery = do
-      pure $ RawSQLResult mainSQLQuery params
+      pure $ RawSQLResult mainSQLQuery params wrHdrsOnly
 
 actionQuery (DbCrud plan@WrappedReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences=Preferences{..}} _ _ =
   (mainActionQuery, mainSQLQuery)
@@ -169,7 +169,7 @@ actionQuery (DbCrud MutateReadPlan{mrMedia = MTApplicationJSONSQL, ..}) AppConfi
       pkCols
       configDbPreparedStatements
     mainActionQuery = do
-      pure $ RawSQLResult mainSQLQuery params
+      pure $ RawSQLResult mainSQLQuery params False
 
 actionQuery (DbCrud plan@MutateReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences=Preferences{..}} _ _ =
   (mainActionQuery, mainSQLQuery)
@@ -202,6 +202,21 @@ actionQuery (DbCrud plan@MutateReadPlan{..}) conf@AppConfig{..} apiReq@ApiReques
       failMutation resultSet
       optionalRollback conf apiReq
       pure $ DbCrudResult plan resultSet
+
+actionQuery (DbCall CallReadPlan{crMedia = MTApplicationJSONSQL, ..}) AppConfig{..} ApiRequest{iPreferences=Preferences{..}} pgVer _ =
+  (mainActionQuery, mainSQLQuery)
+  where
+    (_, mainSQLQuery, params) = Statements.prepareCall
+      crProc
+      (QueryBuilder.callPlanToQuery crCallPlan pgVer)
+      (QueryBuilder.readPlanToQuery crReadPlan)
+      (QueryBuilder.readPlanToCountQuery crReadPlan)
+      (shouldCount preferCount)
+      MTApplicationJSONSQL
+      crHandler
+      configDbPreparedStatements
+    mainActionQuery = do
+      pure $ RawSQLResult mainSQLQuery params False
 
 actionQuery (DbCall plan@CallReadPlan{..}) conf@AppConfig{..} apiReq@ApiRequest{iPreferences=Preferences{..}} pgVer _ =
   (mainActionQuery, mainSQLQuery)
